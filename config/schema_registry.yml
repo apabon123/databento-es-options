@@ -1,0 +1,89 @@
+products:
+
+
+  ES_OPTIONS_MDP3:
+    description: "ES options on futures - CME Globex MDP 3.0"
+    # These globs are relative to the --source you pass on the CLI.
+    # Example --source: data/raw/glbx-mdp3-2025-10-30
+    inputs:
+      instruments: "instruments/*.parquet"
+      quotes_l1:   "quotes_l1/*.parquet"
+      trades:      "trades/*.parquet"
+    migrations: ["0001_core.sql", "1000_es_options_mdp3.sql"]
+    loader: "pipelines.products.es_options_mdp3:load"
+    gold_sql: |
+      insert into g_bar_1m
+      select
+        date_trunc('minute', q.ts_event) as ts_minute,
+        q.instrument_id,
+        min_by((q.bid_px + q.ask_px)/2, q.ts_event) as o_mid,
+        max((q.bid_px + q.ask_px)/2) as h_mid,
+        min((q.bid_px + q.ask_px)/2) as l_mid,
+        max_by((q.bid_px + q.ask_px)/2, q.ts_event) as c_mid,
+        min_by(q.ask_px - q.bid_px, q.ts_event) as o_spread,
+        max_by(q.ask_px - q.bid_px, q.ts_event) as c_spread,
+        coalesce(sum(t.last_sz),0) as v_trades,
+        coalesce(sum(t.last_sz * t.last_px),0) as v_notional
+      from f_quote_l1 q
+      left join f_trade t
+        on t.instrument_id = q.instrument_id
+       and date_trunc('minute', t.ts_event) = date_trunc('minute', q.ts_event)
+      where q.ts_event > coalesce((select max(ts_minute) from g_bar_1m), '1900-01-01')
+      group by 1,2;
+
+
+  ES_FUTURES_MDP3:
+    description: "ES futures (book/trades) - CME Globex MDP 3.0"
+    inputs:
+      instruments: "fut_instruments/*.parquet"
+      quotes_l1:   "fut_quotes_l1/*.parquet"
+      trades:      "fut_trades/*.parquet"
+    migrations: ["0001_core.sql", "1001_es_futures_mdp3.sql"]
+    loader: "pipelines.products.es_futures_mdp3:load"
+    gold_sql: |
+      insert into g_fut_bar_1m
+      select
+        date_trunc('minute', q.ts_event) as ts_minute,
+        q.instrument_id,
+        min_by((q.bid_px + q.ask_px)/2, q.ts_event) as o_mid,
+        max((q.bid_px + q.ask_px)/2) as h_mid,
+        min((q.bid_px + q.ask_px)/2) as l_mid,
+        max_by((q.bid_px + q.ask_px)/2, q.ts_event) as c_mid,
+        coalesce(sum(t.last_sz),0) as v_trades,
+        coalesce(sum(t.last_sz * t.last_px),0) as v_notional
+      from f_fut_quote_l1 q
+      left join f_fut_trade t
+        on t.instrument_id = q.instrument_id
+       and date_trunc('minute', t.ts_event) = date_trunc('minute', q.ts_event)
+      where q.ts_event > coalesce((select max(ts_minute) from g_fut_bar_1m), '1900-01-01')
+      group by 1,2;
+
+
+  ES_CONTINUOUS_MDP3:
+    description: "ES continuous futures (front month with custom roll rules)"
+    inputs:
+      instruments: "continuous_instruments/*.parquet"
+      quotes_l1:   "continuous_quotes_l1/*.parquet"
+      trades:      "continuous_trades/*.parquet"
+    migrations: ["0001_core.sql", "1002_es_continuous_mdp3.sql"]
+    loader: "pipelines.products.es_continuous_mdp3:load"
+    gold_sql: |
+      insert or ignore into g_continuous_bar_1m
+      select
+        date_trunc('minute', q.ts_event) as ts_minute,
+        q.contract_series,
+        any_value(q.underlying_instrument_id) as underlying_instrument_id,
+        min_by((q.bid_px + q.ask_px)/2, q.ts_event) as o_mid,
+        max((q.bid_px + q.ask_px)/2) as h_mid,
+        min((q.bid_px + q.ask_px)/2) as l_mid,
+        max_by((q.bid_px + q.ask_px)/2, q.ts_event) as c_mid,
+        coalesce(sum(t.last_sz),0) as v_trades,
+        coalesce(sum(t.last_sz * t.last_px),0) as v_notional
+      from f_continuous_quote_l1 q
+      left join f_continuous_trade t
+        on t.contract_series = q.contract_series
+       and date_trunc('minute', t.ts_event) = date_trunc('minute', q.ts_event)
+      where q.ts_event > coalesce((select max(ts_minute) from g_continuous_bar_1m), '1900-01-01')
+      group by 1,2;
+
+

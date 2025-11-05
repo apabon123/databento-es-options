@@ -15,14 +15,18 @@ Scripts for downloading data from DataBento and ingesting into the database.
 ### `database/` - Database Management Scripts
 Scripts for inspecting, maintaining, and checking the database.
 
-- **`check_database.py`** - Check for duplicate rows and show database statistics
+- **`check_database.py`** - Check for duplicate rows, show database statistics, and verify data coverage
 - **`inspect_futures.py`** - Inspect ES futures data in detail
+
+### `utils/` - Utility Scripts
+Utility scripts for data management and organization.
+
+- **`organize_raw_folder.py`** - Analyze and clean up raw data folder structure
 
 ### `analysis/` - Data Analysis Scripts
 Scripts for analyzing downloaded data.
 
-- **`analyze_data.py`** - Analyze downloaded data
-- **`analyze_downloaded_data.py`** - Analyze downloaded data files
+- **`analyze_data.py`** - Analyze downloaded ES options data for quality and completeness
 
 ## Usage Examples
 
@@ -40,19 +44,34 @@ python scripts/download/download_and_ingest_continuous.py --weeks 1
 
 ### Database Management
 ```powershell
-# Check for duplicates
+# Check for duplicates and show statistics
 python scripts/database/check_database.py
 
-# Inspect futures data
-python scripts/database/inspect_futures.py
+# Show statistics only
+python scripts/database/check_database.py --stats-only
 
 # Check specific product
 python scripts/database/check_database.py --product ES_CONTINUOUS_MDP3
+
+# Verify continuous futures coverage (check for missing dates and data quality)
+python scripts/database/check_database.py --verify-coverage --year 2025
+
+# Inspect futures data
+python scripts/database/inspect_futures.py
+```
+
+### Utilities
+```powershell
+# Analyze raw folder structure
+python scripts/utils/organize_raw_folder.py
+
+# Clean up old/misnamed folders
+python scripts/utils/organize_raw_folder.py --delete-old
 ```
 
 ### Analysis
 ```powershell
 # Analyze downloaded data
-python scripts/analysis/analyze_downloaded_data.py
+python scripts/analysis/analyze_data.py
 ```
 

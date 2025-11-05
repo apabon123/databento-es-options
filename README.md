@@ -115,7 +115,7 @@ databento-es-options/
 │   ├── download_and_ingest_options.py      # All-in-one options wrapper (NEW)
 │   ├── download_and_ingest_futures.py      # All-in-one futures wrapper (NEW)
 │   ├── inspect_futures.py                  # Inspect futures data in DB (NEW)
-│   ├── download_last_week.py               # Download only (legacy)
+│   ├── download_last_week.py               # Download only (legacy, use download_and_ingest_*.py instead)
 │   └── analyze_data.py                     # Validation runner
 ├── pipelines/                              # Database pipeline
 │   ├── products/                           # Product-specific loaders
@@ -218,13 +218,15 @@ For issues with:
 
 If you need fine-grained control, you can use the lower-level tools:
 
-### Download Only (no database)
+### Download Only (Legacy - No Database)
+**Note:** These scripts download but don't ingest. Use `download_and_ingest_*.py` scripts instead.
+
 ```powershell
-# Download last week's data
-python scripts/download_last_week.py
+# Download last week's data (legacy, no ingestion)
+python scripts/download/download_last_week.py
 
 # Analyze downloaded files
-python scripts/analyze_data.py
+python scripts/analysis/analyze_data.py
 ```
 
 ### Manual Database Operations

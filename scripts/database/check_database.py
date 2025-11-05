@@ -18,6 +18,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines.common import get_paths, connect_duckdb
 import duckdb
+from datetime import timedelta
 
 
 def check_duplicates(con, table_name: str, unique_columns: list) -> dict:
@@ -237,6 +238,148 @@ def show_summary_stats(con):
     print("=" * 80)
 
 
+def verify_continuous_coverage(con, year: int = 2025):
+    """Verify complete coverage of continuous futures data for a given year."""
+    from datetime import date, datetime
+    
+    def get_trading_days(y):
+        """Get all trading days (Mon-Fri) for a year."""
+        start = date(y, 1, 1)
+        end = date(y, 12, 31)
+        trading_days = []
+        current = start
+        while current <= end:
+            if current.weekday() < 5:  # Monday = 0, Friday = 4
+                trading_days.append(current)
+            current += timedelta(days=1)
+        return trading_days
+    
+    print("=" * 80)
+    print(f"CONTINUOUS FUTURES DATA COVERAGE VERIFICATION - {year}")
+    print("=" * 80)
+    print()
+    
+    # Get all trading days for the year
+    expected_days = get_trading_days(year)
+    print(f"Expected trading days in {year}: {len(expected_days)}")
+    print(f"Date range: {min(expected_days)} to {max(expected_days)}")
+    print()
+    
+    # Get dates in database
+    db_data = con.execute('''
+        SELECT 
+            CAST(ts_event AS DATE) as date,
+            COUNT(*) as quote_count
+        FROM f_continuous_quote_l1
+        WHERE CAST(ts_event AS DATE) IS NOT NULL
+          AND EXTRACT(YEAR FROM ts_event) = ?
+        GROUP BY CAST(ts_event AS DATE)
+        ORDER BY date
+    ''', [year]).fetchdf()
+    
+    # Convert database dates to date objects for comparison
+    db_date_objects = [d.date() if isinstance(d, datetime) else d for d in db_data['date'].tolist()]
+    db_dates = set(db_date_objects)
+    print(f"Dates in database: {len(db_dates)}")
+    
+    # Find missing dates
+    missing_dates = sorted([d for d in expected_days if d not in db_dates])
+    
+    if missing_dates:
+        print(f"\nMISSING DATES: {len(missing_dates)}")
+        print("-" * 80)
+        # Group by month
+        by_month = {}
+        for d in missing_dates:
+            month_key = (d.year, d.month)
+            if month_key not in by_month:
+                by_month[month_key] = []
+            by_month[month_key].append(d)
+        
+        for (y, m), days in sorted(by_month.items()):
+            print(f"{y}-{m:02d}: {len(days)} missing days")
+            if len(days) <= 10:
+                print(f"  Dates: {[str(d) for d in days]}")
+            else:
+                print(f"  Dates: {[str(d) for d in days[:5]]} ... and {len(days)-5} more")
+    else:
+        print("\n✓ All expected trading days are present!")
+    print()
+    
+    # Check quote counts per day
+    print("QUOTE COUNT ANALYSIS:")
+    print("-" * 80)
+    
+    full_days = db_data[db_data['quote_count'] >= 1200]
+    partial_days = db_data[(db_data['quote_count'] >= 200) & (db_data['quote_count'] < 1200)]
+    test_days = db_data[db_data['quote_count'] < 50]
+    very_partial = db_data[(db_data['quote_count'] >= 50) & (db_data['quote_count'] < 200)]
+    
+    print(f"Full days (~1,300 quotes): {len(full_days)} days")
+    if len(full_days) > 0:
+        print(f"  Range: {full_days['quote_count'].min():.0f} - {full_days['quote_count'].max():.0f} quotes")
+        print(f"  Average: {full_days['quote_count'].mean():.0f} quotes/day")
+    
+    print(f"\nPartial days (200-1,200 quotes): {len(partial_days)} days")
+    if len(partial_days) > 0:
+        print(f"  Range: {partial_days['quote_count'].min():.0f} - {partial_days['quote_count'].max():.0f} quotes")
+    
+    print(f"\nVery partial days (50-200 quotes): {len(very_partial)} days")
+    if len(very_partial) > 0:
+        print(f"  Dates: {[str(d) for d in very_partial['date'].tolist()[:10]]}")
+    
+    print(f"\nTest data (< 50 quotes): {len(test_days)} days")
+    if len(test_days) > 0:
+        print(f"  Dates: {[str(d) for d in test_days['date'].tolist()]}")
+    
+    print()
+    
+    # Monthly summary
+    print("MONTHLY SUMMARY:")
+    print("-" * 80)
+    monthly = con.execute('''
+        SELECT 
+            EXTRACT(YEAR FROM ts_event) as year,
+            EXTRACT(MONTH FROM ts_event) as month,
+            COUNT(DISTINCT CAST(ts_event AS DATE)) as trading_days,
+            COUNT(*) as total_quotes,
+            AVG(daily_quotes) as avg_quotes_per_day
+        FROM (
+            SELECT 
+                ts_event,
+                COUNT(*) OVER (PARTITION BY CAST(ts_event AS DATE)) as daily_quotes
+            FROM f_continuous_quote_l1
+            WHERE CAST(ts_event AS DATE) IS NOT NULL
+              AND EXTRACT(YEAR FROM ts_event) = ?
+        ) sub
+        GROUP BY EXTRACT(YEAR FROM ts_event), EXTRACT(MONTH FROM ts_event)
+        ORDER BY year, month
+    ''', [year]).fetchdf()
+    
+    print(monthly.to_string(index=False))
+    print()
+    
+    # Summary
+    print("=" * 80)
+    print("SUMMARY")
+    print("=" * 80)
+    print(f"Expected trading days: {len(expected_days)}")
+    print(f"Dates in database: {len(db_dates)}")
+    print(f"Missing dates: {len(missing_dates)}")
+    print(f"Full days: {len(full_days)}")
+    print(f"Partial days: {len(partial_days)}")
+    print(f"Test data days: {len(test_days)}")
+    print()
+    
+    if len(missing_dates) == 0 and len(full_days) == len(expected_days):
+        print("[SUCCESS] PERFECT COVERAGE: All expected trading days have full data!")
+    elif len(missing_dates) == 0:
+        print("[WARNING] ALL DAYS PRESENT: But some days have partial data")
+    else:
+        print("[INCOMPLETE] Missing dates or partial data")
+    print()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Check database for duplicates and show statistics"
@@ -258,6 +401,17 @@ def main():
         default=None,
         help='Path to DuckDB database (default: data/silver/market.duckdb)'
     )
+    parser.add_argument(
+        '--verify-coverage',
+        action='store_true',
+        help='Verify complete coverage for continuous futures (checks for missing dates and data quality)'
+    )
+    parser.add_argument(
+        '--year',
+        type=int,
+        default=2025,
+        help='Year to verify coverage for (default: 2025)'
+    )
     
     args = parser.parse_args()
     
@@ -276,7 +430,9 @@ def main():
     con = connect_duckdb(db_path)
     
     try:
-        if args.stats_only:
+        if args.verify_coverage:
+            verify_continuous_coverage(con, args.year)
+        elif args.stats_only:
             show_summary_stats(con)
         elif args.product:
             check_specific_product(con, args.product)

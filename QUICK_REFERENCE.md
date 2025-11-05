@@ -74,7 +74,24 @@ python scripts/download/download_and_ingest_options.py --weeks 2 --yes
 python scripts/download/download_and_ingest_options.py --ingest-only
 ```
 
-## Database Queries
+## Database Management
+
+### Check Database
+```powershell
+# Check all products for duplicates and show statistics
+python scripts/database/check_database.py
+
+# Show statistics only
+python scripts/database/check_database.py --stats-only
+
+# Verify continuous futures coverage
+python scripts/database/check_database.py --verify-coverage --year 2025
+
+# Inspect futures data
+python scripts/database/inspect_futures.py
+```
+
+### Database Queries
 
 ### Python
 ```python

@@ -47,7 +47,9 @@ python scripts/download/download_and_ingest_continuous.py --weeks 1 --last-minut
 ```
 
 ### `download_last_week.py`
-Quick script to download last week's data.
+**Legacy script** - Quick script to download last week's 5-minute ES options data (download only, no ingestion).
+
+**Note:** This is superseded by `download_and_ingest_options.py --weeks 1` which handles both download and ingestion.
 
 **Usage:**
 ```powershell

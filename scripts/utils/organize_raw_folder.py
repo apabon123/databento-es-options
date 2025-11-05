@@ -13,7 +13,7 @@ from datetime import datetime
 from collections import defaultdict
 
 # Add project root to path
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines.common import get_paths

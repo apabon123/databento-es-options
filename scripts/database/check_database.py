@@ -149,6 +149,9 @@ def check_specific_product(con, product: str):
     elif product == "ES_CONTINUOUS_MDP3":
         table = "f_continuous_quote_l1"
         cols = ["ts_event", "contract_series", "underlying_instrument_id"]
+    elif product == "ES_CONTINUOUS_DAILY_MDP3":
+        table = "g_continuous_bar_daily"
+        cols = ["trading_date", "contract_series"]
     else:
         print(f"Unknown product: {product}")
         return
@@ -217,7 +220,7 @@ def show_summary_stats(con):
         print(f"  Date range: {stats[3]} to {stats[4]}")
         print()
     
-    # ES Continuous Futures
+    # ES Continuous Futures (1-minute data)
     if check_table_exists(con, "f_continuous_quote_l1"):
         stats = con.execute("""
             SELECT 
@@ -228,8 +231,26 @@ def show_summary_stats(con):
                 MAX(ts_event) as last_quote
             FROM f_continuous_quote_l1
         """).fetchone()
-        print("ES Continuous Futures:")
+        print("ES Continuous Futures (1-minute):")
         print(f"  Total quotes: {stats[0]:,}")
+        print(f"  Unique contract series: {stats[1]:,}")
+        print(f"  Trading days: {stats[2]}")
+        print(f"  Date range: {stats[3]} to {stats[4]}")
+        print()
+    
+    # ES Continuous Futures (Daily bars)
+    if check_table_exists(con, "g_continuous_bar_daily"):
+        stats = con.execute("""
+            SELECT 
+                COUNT(*) as total_bars,
+                COUNT(DISTINCT contract_series) as unique_series,
+                COUNT(DISTINCT trading_date) as trading_days,
+                MIN(trading_date) as first_date,
+                MAX(trading_date) as last_date
+            FROM g_continuous_bar_daily
+        """).fetchone()
+        print("ES Continuous Futures (Daily bars):")
+        print(f"  Total daily bars: {stats[0]:,}")
         print(f"  Unique contract series: {stats[1]:,}")
         print(f"  Trading days: {stats[2]}")
         print(f"  Date range: {stats[3]} to {stats[4]}")
@@ -387,7 +408,7 @@ def main():
     parser.add_argument(
         '--product',
         type=str,
-        choices=['ES_OPTIONS_MDP3', 'ES_FUTURES_MDP3', 'ES_CONTINUOUS_MDP3'],
+        choices=['ES_OPTIONS_MDP3', 'ES_FUTURES_MDP3', 'ES_CONTINUOUS_MDP3', 'ES_CONTINUOUS_DAILY_MDP3'],
         help='Check specific product only'
     )
     parser.add_argument(

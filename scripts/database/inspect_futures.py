@@ -101,29 +101,61 @@ def show_summary(con):
         print("CONTINUOUS FUTURES TABLES SUMMARY")
         print("=" * 80)
         
-        continuous_summary = con.execute("""
+        # Build query dynamically based on which tables exist
+        queries = []
+        
+        # Always check these tables
+        queries.append("""
             SELECT 
                 'dim_continuous_contract' as table_name,
                 COUNT(*) as row_count,
                 COUNT(DISTINCT contract_series) as unique_series
             FROM dim_continuous_contract
-            
-            UNION ALL
-            
+        """)
+        
+        queries.append("""
             SELECT 
                 'f_continuous_quote_l1' as table_name,
                 COUNT(*) as row_count,
                 COUNT(DISTINCT contract_series) as unique_series
             FROM f_continuous_quote_l1
-            
-            UNION ALL
-            
-            SELECT 
-                'g_continuous_bar_1m' as table_name,
-                COUNT(*) as row_count,
-                COUNT(DISTINCT contract_series) as unique_series
-            FROM g_continuous_bar_1m
-        """).fetchdf()
+        """)
+        
+        # Check if 1-minute bar table exists
+        bar_1m_check = con.execute("""
+            SELECT COUNT(*) as exists
+            FROM information_schema.tables 
+            WHERE table_name = 'g_continuous_bar_1m'
+        """).fetchone()[0]
+        
+        if bar_1m_check > 0:
+            queries.append("""
+                SELECT 
+                    'g_continuous_bar_1m' as table_name,
+                    COUNT(*) as row_count,
+                    COUNT(DISTINCT contract_series) as unique_series
+                FROM g_continuous_bar_1m
+            """)
+        
+        # Check if daily bar table exists
+        bar_daily_check = con.execute("""
+            SELECT COUNT(*) as exists
+            FROM information_schema.tables 
+            WHERE table_name = 'g_continuous_bar_daily'
+        """).fetchone()[0]
+        
+        if bar_daily_check > 0:
+            queries.append("""
+                SELECT 
+                    'g_continuous_bar_daily' as table_name,
+                    COUNT(*) as row_count,
+                    COUNT(DISTINCT contract_series) as unique_series
+                FROM g_continuous_bar_daily
+            """)
+        
+        # Combine all queries
+        query = " UNION ALL ".join(queries)
+        continuous_summary = con.execute(query).fetchdf()
         
         print(continuous_summary.to_string(index=False))
         print()
@@ -336,6 +368,128 @@ def show_spread_analysis(con):
     print()
 
 
+def show_continuous_daily_bars(con, contract_series='ES_FRONT_MONTH'):
+    """Show daily bars for a continuous contract."""
+    print("=" * 80)
+    print(f"CONTINUOUS CONTRACT: {contract_series} - DAILY BARS")
+    print("=" * 80)
+    
+    # Check if table exists
+    table_check = con.execute("""
+        SELECT COUNT(*) as exists
+        FROM information_schema.tables 
+        WHERE table_name = 'g_continuous_bar_daily'
+    """).fetchone()[0]
+    
+    if table_check == 0:
+        print("Daily bars table does not exist.")
+        print()
+        return
+    
+    daily_bars = con.execute("""
+        SELECT 
+            trading_date,
+            contract_series,
+            open,
+            high,
+            low,
+            close,
+            volume
+        FROM g_continuous_bar_daily
+        WHERE contract_series = ?
+        ORDER BY trading_date
+    """, [contract_series]).fetchdf()
+    
+    if len(daily_bars) == 0:
+        print(f"No daily bars found for {contract_series}")
+        print()
+        return
+    
+    print(f"Total daily bars: {len(daily_bars)}")
+    print(f"Date range: {daily_bars['trading_date'].min()} to {daily_bars['trading_date'].max()}")
+    print()
+    print("First 10 bars:")
+    print(daily_bars.head(10).to_string(index=False))
+    print()
+    print("Last 10 bars:")
+    print(daily_bars.tail(10).to_string(index=False))
+    print()
+    
+    # Summary statistics
+    print("Summary Statistics:")
+    print(daily_bars[['open', 'high', 'low', 'close', 'volume']].describe().to_string())
+    print()
+
+
+def show_continuous_daily_coverage(con):
+    """Show daily bars coverage by contract series."""
+    print("=" * 80)
+    print("CONTINUOUS DAILY BARS COVERAGE")
+    print("=" * 80)
+    
+    # Check if table exists
+    table_check = con.execute("""
+        SELECT COUNT(*) as exists
+        FROM information_schema.tables 
+        WHERE table_name = 'g_continuous_bar_daily'
+    """).fetchone()[0]
+    
+    if table_check == 0:
+        print("Daily bars table does not exist.")
+        print()
+        return
+    
+    # Get coverage with root information
+    coverage = con.execute("""
+        SELECT 
+            c.root,
+            g.contract_series,
+            COUNT(*) as bar_count,
+            MIN(g.trading_date) as first_date,
+            MAX(g.trading_date) as last_date,
+            COUNT(DISTINCT g.trading_date) as trading_days,
+            AVG(g.volume) as avg_volume,
+            SUM(g.volume) as total_volume
+        FROM g_continuous_bar_daily g
+        JOIN dim_continuous_contract c ON g.contract_series = c.contract_series
+        GROUP BY c.root, g.contract_series
+        ORDER BY c.root, g.contract_series
+    """).fetchdf()
+    
+    if len(coverage) == 0:
+        print("No daily bars found in database.")
+        print()
+        return
+    
+    print(f"Total contract series: {len(coverage)}")
+    print()
+    print(coverage.to_string(index=False))
+    print()
+    
+    # Show summary by root
+    summary_by_root = con.execute("""
+        SELECT 
+            c.root,
+            COUNT(DISTINCT g.contract_series) as contract_count,
+            COUNT(*) as total_bars,
+            MIN(g.trading_date) as first_date,
+            MAX(g.trading_date) as last_date,
+            COUNT(DISTINCT g.trading_date) as total_trading_days,
+            SUM(g.volume) as total_volume
+        FROM g_continuous_bar_daily g
+        JOIN dim_continuous_contract c ON g.contract_series = c.contract_series
+        GROUP BY c.root
+        ORDER BY c.root
+    """).fetchdf()
+    
+    if len(summary_by_root) > 0:
+        print("=" * 80)
+        print("SUMMARY BY ROOT")
+        print("=" * 80)
+        print(summary_by_root.to_string(index=False))
+        print()
+
+
 def show_quality_checks(con):
     """Show data quality checks."""
     print("=" * 80)
@@ -469,6 +623,28 @@ def main():
         show_contract_bars(con, args.contract)
         show_spread_analysis(con)
         show_quality_checks(con)
+        
+        # Show continuous daily bars if they exist
+        show_continuous_daily_coverage(con)
+        
+        # Show bars for each contract series found
+        table_check = con.execute("""
+            SELECT COUNT(*) as exists
+            FROM information_schema.tables 
+            WHERE table_name = 'g_continuous_bar_daily'
+        """).fetchone()[0]
+        
+        if table_check > 0:
+            contract_series_list = con.execute("""
+                SELECT DISTINCT contract_series
+                FROM g_continuous_bar_daily
+                ORDER BY contract_series
+            """).fetchdf()
+            
+            if len(contract_series_list) > 0:
+                for _, row in contract_series_list.iterrows():
+                    contract_series = row['contract_series']
+                    show_continuous_daily_bars(con, contract_series)
         
         # Export if requested
         if args.export:

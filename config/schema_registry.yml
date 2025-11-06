@@ -87,3 +87,15 @@ products:
       group by 1,2;
 
 
+  ES_CONTINUOUS_DAILY_MDP3:
+    description: "ES continuous futures daily OHLCV bars (pre-aggregated from DataBento)"
+    inputs:
+      instruments: "continuous_instruments/*.parquet"
+      bars_daily:  "continuous_bars_daily/*.parquet"
+    migrations: ["0001_core.sql", "1002_es_continuous_mdp3.sql", "1004_es_continuous_daily_bars.sql"]
+    loader: "pipelines.products.es_continuous_daily_mdp3:load"
+    gold_sql: |
+      -- Daily bars are already aggregated, so no gold_sql needed
+      -- Data goes directly into g_continuous_bar_daily via loader
+
+

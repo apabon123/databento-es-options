@@ -41,6 +41,12 @@ data/raw/*.dbn.zst
 data/raw/*.parquet
 data/GLBX-*/
 
+# Database files
+*.duckdb
+*.duckdb.wal
+data/silver/
+data/gold/
+
 # Logs
 logs/*.log
 

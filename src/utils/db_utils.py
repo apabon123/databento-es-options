@@ -13,7 +13,8 @@ def get_existing_dates_in_db(product: str) -> Set[date]:
     Query database to find what dates already have data.
     
     Args:
-        product: 'ES_OPTIONS_MDP3' or 'ES_FUTURES_MDP3'
+        product: Product code such as 'ES_OPTIONS_MDP3', 'ES_FUTURES_MDP3',
+            'ES_CONTINUOUS_MDP3', or 'ES_CONTINUOUS_DAILY_MDP3'.
     
     Returns:
         Set of dates that already have data in the database
@@ -29,17 +30,23 @@ def get_existing_dates_in_db(product: str) -> Set[date]:
     # Determine which table to query based on product
     if product == "ES_OPTIONS_MDP3":
         table = "f_quote_l1"
+        date_column = "ts_event"
     elif product == "ES_FUTURES_MDP3":
         table = "f_fut_quote_l1"
+        date_column = "ts_event"
     elif product == "ES_CONTINUOUS_MDP3":
         table = "f_continuous_quote_l1"
+        date_column = "ts_event"
+    elif product == "ES_CONTINUOUS_DAILY_MDP3":
+        table = "g_continuous_bar_daily"
+        date_column = "trading_date"
     else:
         raise ValueError(f"Unknown product: {product}")
     
     try:
-        # Get unique dates from the quote table
+        # Get unique dates from the relevant table
         query = f"""
-        SELECT DISTINCT CAST(ts_event AS DATE) as trade_date
+        SELECT DISTINCT CAST({date_column} AS DATE) as trade_date
         FROM {table}
         ORDER BY trade_date
         """
@@ -51,8 +58,39 @@ def get_existing_dates_in_db(product: str) -> Set[date]:
         # Convert to Python date objects
         dates = set(pd.to_datetime(result['trade_date']).dt.date)
         return dates
-    except Exception as e:
+    except Exception:
         # Table might not exist yet
+        return set()
+    finally:
+        con.close()
+
+
+def get_existing_daily_dates_for_series(contract_series: str) -> Set[date]:
+    """Return the set of trading dates present for a given continuous contract series."""
+    from pipelines.common import get_paths, connect_duckdb
+
+    _, _, dbpath = get_paths()
+    if not dbpath.exists():
+        return set()
+
+    con = connect_duckdb(dbpath)
+
+    try:
+        result = con.execute(
+            """
+            SELECT DISTINCT trading_date
+            FROM g_continuous_bar_daily
+            WHERE contract_series = ?
+            ORDER BY trading_date
+            """,
+            [contract_series],
+        ).fetchdf()
+
+        if result.empty:
+            return set()
+
+        return set(pd.to_datetime(result['trading_date']).dt.date)
+    except Exception:
         return set()
     finally:
         con.close()

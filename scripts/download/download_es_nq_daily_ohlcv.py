@@ -1,26 +1,25 @@
 """
-Download and ingest ES and NQ continuous futures daily OHLCV data from DataBento.
+Download and ingest continuous futures daily OHLCV data from DataBento.
 
-This script downloads daily OHLCV bars for ES and NQ continuous futures front month
-with a configurable roll strategy (default: calendar-2d = 2-day pre-expiry calendar roll),
-transforms them, and ingests them into the database.
+Supported front-month contract series (organised by asset class):
 
-Roll strategies are encoded in the folder structure:
-    ohlcv-1d/downloads/{root}/calendar-2d/   (2-day pre-expiry)
-    ohlcv-1d/downloads/{root}/volume/        (volume-based roll)
-    etc.
+- Equity indices: ES_FRONT_CALENDAR_2D, NQ_FRONT_CALENDAR_2D, RTY_FRONT_CALENDAR_2D
+- Rates: ZT_FRONT_VOLUME, ZF_FRONT_VOLUME, ZN_FRONT_VOLUME, UB_FRONT_VOLUME
+- Commodities: CL_FRONT_VOLUME, GC_FRONT_VOLUME
+- FX: 6E_FRONT_CALENDAR_2D, 6J_FRONT_CALENDAR_2D, 6B_FRONT_CALENDAR_2D
 
-Usage:
-    # Download 2025 data (Jan 1 to today) for both ES and NQ
-    python scripts/download/download_es_nq_daily_ohlcv.py --start 2025-01-01 --end 2025-11-05
-    
-    # Download with auto-confirmation
-    python scripts/download/download_es_nq_daily_ohlcv.py --start 2025-01-01 --end 2025-11-05 --yes
-    
-    # Download for specific roots
-    python scripts/download/download_es_nq_daily_ohlcv.py --start 2025-01-01 --roots ES,NQ
-    
-    # View database summary
+Daily files are downloaded using DataBento's `ohlcv-1d` schema, organised by
+root and roll strategy (e.g., `calendar-2d`, `volume`), transformed into the
+loader folder structure, and ingested into DuckDB.
+
+Usage examples:
+    # Download from 2020-01-01 to today for the default root set
+    python scripts/download/download_es_nq_daily_ohlcv.py --yes
+
+    # Download a subset (e.g., rates only)
+    python scripts/download/download_es_nq_daily_ohlcv.py --roots ZT,ZF,ZN,UB --yes
+
+    # Inspect database coverage
     python scripts/download/download_es_nq_daily_ohlcv.py --summary
 """
 
@@ -35,8 +34,16 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parents[2]  # Go up 3 levels: download -> scripts -> project root
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.utils.continuous_transform import transform_continuous_ohlcv_daily_to_folder_structure, get_continuous_symbol
-from src.utils.db_utils import get_existing_dates_in_db, get_db_summary
+from src.utils.continuous_transform import (
+    transform_continuous_ohlcv_daily_to_folder_structure,
+    get_continuous_symbol,
+    make_contract_series,
+)
+from src.utils.db_utils import (
+    get_existing_dates_in_db,
+    get_existing_daily_dates_for_series,
+    get_db_summary,
+)
 from pipelines.common import get_paths, connect_duckdb
 from pipelines.loader import load
 import databento as db
@@ -54,8 +61,37 @@ logger = logging.getLogger(__name__)
 PRODUCT = "ES_CONTINUOUS_DAILY_MDP3"
 DATASET = "GLBX.MDP3"
 SCHEMA = "ohlcv-1d"  # Daily OHLCV bars
-DEFAULT_ROOTS = ["ES", "NQ"]  # Both ES and NQ
-ROLL_RULE = "2_days_pre_expiry"
+DEFAULT_START_DATE = "2020-01-01"
+
+# Roll strategy configuration per root
+ROLL_CONFIG: dict[str, dict[str, str]] = {
+    # Equity indices
+    "ES": {"roll_strategy": "calendar-2d", "roll_rule": "2_days_pre_expiry", "asset_class": "Equity Indices"},
+    "NQ": {"roll_strategy": "calendar-2d", "roll_rule": "2_days_pre_expiry", "asset_class": "Equity Indices"},
+    "RTY": {"roll_strategy": "calendar-2d", "roll_rule": "2_days_pre_expiry", "asset_class": "Equity Indices"},
+    # Rates
+    "ZT": {"roll_strategy": "volume", "roll_rule": "volume_roll", "asset_class": "Rates"},
+    "ZF": {"roll_strategy": "volume", "roll_rule": "volume_roll", "asset_class": "Rates"},
+    "ZN": {"roll_strategy": "volume", "roll_rule": "volume_roll", "asset_class": "Rates"},
+    "UB": {"roll_strategy": "volume", "roll_rule": "volume_roll", "asset_class": "Rates"},
+    # Commodities
+    "CL": {"roll_strategy": "volume", "roll_rule": "volume_roll", "asset_class": "Commodities"},
+    "GC": {"roll_strategy": "volume", "roll_rule": "volume_roll", "asset_class": "Commodities"},
+    # FX
+    "6E": {"roll_strategy": "calendar-2d", "roll_rule": "2_days_pre_expiry", "asset_class": "FX"},
+    "6J": {"roll_strategy": "calendar-2d", "roll_rule": "2_days_pre_expiry", "asset_class": "FX"},
+    "6B": {"roll_strategy": "calendar-2d", "roll_rule": "2_days_pre_expiry", "asset_class": "FX"},
+}
+
+DEFAULT_ROOTS = list(ROLL_CONFIG.keys())
+
+def get_root_config(root: str) -> dict[str, str]:
+    """Return roll configuration for a given root."""
+    try:
+        return ROLL_CONFIG[root]
+    except KeyError as exc:
+        raise ValueError(f"No roll configuration defined for root '{root}'") from exc
+
 
 import pytz
 
@@ -163,39 +199,61 @@ def download_continuous_daily_multi_root(
         logger.info(f"Processing {root}")
         logger.info("=" * 80)
         
-        # Get continuous symbol (front month, 2-day pre-expiry roll)
-        symbol = get_continuous_symbol(root, rank=0)
-        
-        logger.info(f"Downloading continuous futures daily OHLCV: {symbol} (roll rule: {ROLL_RULE})")
+        # Get continuous symbol (front month)
+        config = get_root_config(root)
+        roll_strategy = config["roll_strategy"]
+        roll_rule = config["roll_rule"]
+        asset_class = config.get("asset_class", "Unknown")
+
+        symbol = get_continuous_symbol(root, rank=0, roll_strategy=roll_strategy)
+        contract_series = make_contract_series(root, roll_strategy)
+
+        logger.info(f"Asset class: {asset_class}")
+        logger.info(f"Contract series: {contract_series} (symbol: {symbol})")
+        logger.info(f"Roll strategy: {roll_strategy} | Roll rule: {roll_rule}")
         logger.info(f"Date range: {start_d} to {end_d}")
         logger.info(f"Schema: {SCHEMA}")
         
+        # Determine which trading days still need data
+        all_trading_days = [d for d in day_iter(start_d, end_d)]
+        if force:
+            requested_days = all_trading_days
+            logger.info(f"Force mode enabled; requesting {len(requested_days)} trading day(s)")
+        else:
+            existing_dates = get_existing_daily_dates_for_series(contract_series)
+            logger.info(f"Existing trading days in DB: {len(existing_dates)}")
+            requested_days = [d for d in all_trading_days if d not in existing_dates]
+            logger.info(f"New trading days to download: {len(requested_days)}")
+        
+        if not requested_days:
+            logger.info("All requested dates already exist in the database; skipping download")
+            continue
+        
         # Get output directory - organized by schema, root, and roll strategy
         bronze_root, _, _ = get_paths()
-        roll_strategy = DEFAULT_ROLL_STRATEGY  # Use default roll strategy
         OUT_DIR = bronze_root / "ohlcv-1d" / "downloads" / root.lower() / roll_strategy
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         
-        # Split date range into quarterly chunks for batch downloading
-        month_chunks = get_month_ranges(start_d, end_d)
-        logger.info(f"Downloading in {len(month_chunks)} quarterly batch(es)")
+        # Split requested dates into manageable quarterly chunks
+        month_chunks = get_month_ranges(requested_days[0], requested_days[-1])
+        logger.info(f"Downloading across {len(month_chunks)} quarterly batch(es)")
         
         for i, (chunk_start, chunk_end) in enumerate(month_chunks, 1):
             logger.info(f"\nBatch {i}/{len(month_chunks)}: {chunk_start} to {chunk_end}")
             
             try:
-                # Get list of trading days in this chunk
-                trading_days = list(day_iter(chunk_start, chunk_end))
-                logger.info(f"  Trading days in chunk: {len(trading_days)}")
+                # Filter requested days for this chunk
+                chunk_days = [d for d in requested_days if chunk_start <= d <= chunk_end]
+                logger.info(f"  Trading days in chunk: {len(chunk_days)}")
                 
-                if not trading_days:
-                    logger.warning(f"  No trading days in chunk {chunk_start} to {chunk_end}")
+                if not chunk_days:
+                    logger.info(f"  No new trading days in chunk {chunk_start} to {chunk_end}")
                     continue
                 
                 # Download entire month with a single API call
                 # For ohlcv-1d, we use dates (start of first day to start of day after last day)
-                chunk_start_date, _ = full_day_window(chunk_start)
-                _, chunk_end_date = full_day_window(chunk_end)
+                chunk_start_date, _ = full_day_window(chunk_days[0])
+                _, chunk_end_date = full_day_window(chunk_days[-1])
                 
                 logger.info(f"  API call: {chunk_start_date} to {chunk_end_date}")
                 data = client.timeseries.get_range(
@@ -208,7 +266,7 @@ def download_continuous_daily_multi_root(
                 )
                 
                 df = data.to_df()
-                logger.info(f"  Received {len(df)} rows for {len(trading_days)} trading days")
+                logger.info(f"  Received {len(df)} rows for {len(chunk_days)} trading days")
                 
                 if df.empty:
                     logger.warning(f"  No data for {root} in chunk {chunk_start} to {chunk_end}")
@@ -217,12 +275,12 @@ def download_continuous_daily_multi_root(
                 # OHLCV-1d returns one row per trading day per symbol
                 # Since there's no date column, we match rows to trading days by order
                 # DataBento returns rows in chronological order
-                if len(df) != len(trading_days):
-                    logger.warning(f"  Expected {len(trading_days)} rows (one per trading day), got {len(df)}")
+                if len(df) != len(chunk_days):
+                    logger.warning(f"  Expected {len(chunk_days)} rows (one per trading day), got {len(df)}")
                     logger.warning(f"  This may indicate missing data for some days")
                 
                 # Assign dates to rows and save one file per day
-                for idx, trade_date in enumerate(trading_days):
+                for idx, trade_date in enumerate(chunk_days):
                     if idx < len(df):
                         # Get the row for this trading day
                         day_df = df.iloc[[idx]].copy()  # Keep as DataFrame
@@ -248,7 +306,9 @@ def download_continuous_daily_multi_root(
     logger.info("\n" + "=" * 80)
     logger.info(f"DOWNLOAD COMPLETE: {total_files} total files")
     for root, files in downloaded_by_root.items():
-        logger.info(f"  {root}: {len(files)} files")
+        config = get_root_config(root)
+        contract_series = make_contract_series(root, config["roll_strategy"])
+        logger.info(f"  {root}: {len(files)} files -> {contract_series}")
     logger.info("=" * 80)
     
     return downloaded_by_root
@@ -273,6 +333,11 @@ def transform_and_ingest(downloaded_by_root: dict, transformed_dirs_override: li
         # Process all downloaded files
         for root, parquet_files in downloaded_by_root.items():
             logger.info(f"\nTransforming {root} files...")
+            config = get_root_config(root)
+            roll_strategy = config["roll_strategy"]
+            roll_rule = config["roll_rule"]
+            contract_series = make_contract_series(root, roll_strategy)
+            logger.info(f"  Contract series: {contract_series} (roll strategy: {roll_strategy}, rule: {roll_rule})")
             
             for parquet_file in parquet_files:
                 # Extract date from filename
@@ -285,7 +350,6 @@ def transform_and_ingest(downloaded_by_root: dict, transformed_dirs_override: li
                     date_part = filename_parts[-3:]
                     date_str = '-'.join(date_part)
                     # Save to organized structure: ohlcv-1d/transformed/{root}/{roll_strategy}/{date}/
-                    roll_strategy = DEFAULT_ROLL_STRATEGY
                     output_dir = bronze / "ohlcv-1d" / "transformed" / root.lower() / roll_strategy / date_str
                 except Exception as e:
                     logger.error(f"Could not parse date from {parquet_file.name}: {e}")
@@ -314,7 +378,8 @@ def transform_and_ingest(downloaded_by_root: dict, transformed_dirs_override: li
                         parquet_file,
                         output_dir,
                         product=PRODUCT,
-                        roll_rule=ROLL_RULE
+                        roll_rule=roll_rule,
+                        roll_strategy=roll_strategy,
                     )
                     transformed_dirs.append(output_dir)
                 except Exception as e:
@@ -407,7 +472,19 @@ def show_summary():
         print("DATABASE SUMMARY - CONTINUOUS FUTURES DAILY BARS")
         print("=" * 80)
         print(f"Product: {PRODUCT}")
-        print(f"Roll rule: {ROLL_RULE}")
+        contract_defs = con.execute(
+            """
+            SELECT root, contract_series, roll_rule
+            FROM dim_continuous_contract
+            ORDER BY root, contract_series
+            """
+        ).fetchdf()
+        if not contract_defs.empty:
+            print("Roll configurations:")
+            for _, row in contract_defs.iterrows():
+                print(f"  {row['root']}: {row['contract_series']} (rule: {row['roll_rule']})")
+        else:
+            print("Roll configurations: none found")
         print()
         print("Overall Coverage:")
         print(f"  Date range: {overall_stats['min_date'].iloc[0]} to {overall_stats['max_date'].iloc[0]}")
@@ -449,11 +526,16 @@ def show_summary():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Download and ingest ES & NQ continuous futures daily OHLCV data (front month, 2-day pre-expiry roll)"
+        description="Download and ingest continuous futures daily OHLCV data across multiple roots"
     )
-    parser.add_argument("--start", type=str, help="Start date (YYYY-MM-DD)", default="2025-01-01")
+    parser.add_argument("--start", type=str, help="Start date (YYYY-MM-DD)", default=DEFAULT_START_DATE)
     parser.add_argument("--end", type=str, help="End date (YYYY-MM-DD)")
-    parser.add_argument("--roots", type=str, help="Comma-separated list of roots (default: ES,NQ)", default="ES,NQ")
+    parser.add_argument(
+        "--roots",
+        type=str,
+        help=f"Comma-separated list of roots (default: {','.join(DEFAULT_ROOTS)})",
+        default=",".join(DEFAULT_ROOTS),
+    )
     parser.add_argument("--force", action="store_true", help="Re-download even if data exists")
     parser.add_argument("--yes", action="store_true", help="Skip confirmation prompts")
     parser.add_argument("--summary", action="store_true", help="Show database summary and exit")
@@ -499,6 +581,9 @@ def main():
             parts = parquet_file.stem.split('.')[0].split('-')
             if len(parts) >= 3:
                 root = parts[2].upper()  # e.g., "es" or "nq"
+                if root not in ROLL_CONFIG:
+                    logger.warning(f"Skipping unsupported root {root} in {parquet_file.name}")
+                    continue
                 if root not in downloaded_by_root:
                     downloaded_by_root[root] = []
                 downloaded_by_root[root].append(parquet_file)
@@ -539,7 +624,16 @@ def main():
         return
     
     # Parse roots
-    roots = [r.strip().upper() for r in args.roots.split(',')]
+    roots = [r.strip().upper() for r in args.roots.split(',') if r.strip()]
+    if not roots:
+        parser.error("At least one root must be specified")
+    # Deduplicate while preserving order
+    roots = list(dict.fromkeys(roots))
+    unsupported = [root for root in roots if root not in ROLL_CONFIG]
+    if unsupported:
+        parser.error(
+            "Unsupported root(s): " + ", ".join(unsupported) + f". Supported roots: {', '.join(ROLL_CONFIG.keys())}"
+        )
     
     # Determine date range
     start_d = date.fromisoformat(args.start)
@@ -552,12 +646,25 @@ def main():
         parser.error("Start date must be before end date")
     
     logger.info("=" * 80)
-    logger.info("ES & NQ Continuous Futures Daily OHLCV Download & Ingest")
+    logger.info("Continuous Futures Daily OHLCV Download & Ingest")
     logger.info("=" * 80)
     logger.info(f"Roots: {', '.join(roots)}")
-    logger.info(f"Roll rule: {ROLL_RULE}")
-    logger.info(f"Date range: {start_d} to {end_d}")
-    logger.info(f"Symbols: {', '.join([get_continuous_symbol(r, 0) for r in roots])}")
+    strategy_summary = ", ".join(
+        f"{root}:{get_root_config(root)['roll_strategy']}" for root in roots
+    )
+    logger.info(f"Roll strategies: {strategy_summary}")
+    contract_series_list = [
+        make_contract_series(root, get_root_config(root)["roll_strategy"])
+        for root in roots
+    ]
+    logger.info(f"Contract series: {', '.join(contract_series_list)}")
+    logger.info(
+        "Symbols: "
+        + ", ".join(
+            get_continuous_symbol(r, 0, get_root_config(r)["roll_strategy"])
+            for r in roots
+        )
+    )
     logger.info("=" * 80)
     
     # Estimate trading days

@@ -6,9 +6,30 @@ import logging
 from pathlib import Path
 from datetime import date
 import pandas as pd
-import databento as db
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_roll_strategy(roll_strategy: str) -> str:
+    """Normalize roll strategy names for contract series identifiers."""
+    return roll_strategy.replace("-", "_").replace(" ", "_").upper()
+
+
+def make_contract_series(root: str, roll_strategy: str, rank: int = 0) -> str:
+    """
+    Build a contract series identifier incorporating the roll strategy.
+
+    Args:
+        root: Futures root symbol (e.g., "ES").
+        roll_strategy: Roll strategy slug (e.g., "calendar-2d", "volume").
+        rank: Contract rank (0 = front month).
+
+    Returns:
+        Contract series identifier, e.g., "ES_FRONT_CALENDAR_2D".
+    """
+    strategy_tag = _normalize_roll_strategy(roll_strategy)
+    prefix = "FRONT" if rank == 0 else f"RANK_{rank}"
+    return f"{root}_{prefix}_{strategy_tag}"
 
 
 def parse_continuous_symbol(symbol: str) -> dict:
@@ -20,7 +41,7 @@ def parse_continuous_symbol(symbol: str) -> dict:
         ES.c.1 -> {"root": "ES", "rank": 1}  # back month
     """
     parts = symbol.split(".")
-    if len(parts) >= 3 and parts[1] == "c":
+    if len(parts) >= 3 and parts[1] in {"c", "v", "o"}:
         return {
             "root": parts[0],
             "rank": int(parts[2]) if parts[2].isdigit() else 0,
@@ -33,6 +54,7 @@ def transform_continuous_to_folder_structure(
     output_base: Path,
     product: str = "ES_CONTINUOUS_MDP3",
     roll_rule: str = "2_days_pre_expiry",
+    roll_strategy: str = "calendar-2d",
 ) -> Path:
     """
     Transform a downloaded continuous futures parquet file into the folder structure
@@ -59,7 +81,8 @@ def transform_continuous_to_folder_structure(
     logger.info(f"Processing {len(df)} rows, {df['symbol'].nunique()} unique symbols")
     
     # Filter for continuous contracts (ES.c.0, ES.c.1, etc.)
-    continuous_mask = df['symbol'].str.contains(r'\.c\.\d+', regex=True, na=False)
+    code = _roll_strategy_to_code(roll_strategy)
+    continuous_mask = df['symbol'].str.contains(rf'\.{code}\.\d+', regex=True, na=False)
     df_continuous = df[continuous_mask].copy()
     
     if df_continuous.empty:
@@ -70,7 +93,7 @@ def transform_continuous_to_folder_structure(
     
     # Parse symbols
     df_continuous['contract_series'] = df_continuous['symbol'].apply(
-        lambda s: f"{parse_continuous_symbol(s)['root']}_FRONT_MONTH"
+        lambda s: make_contract_series(parse_continuous_symbol(s)['root'], roll_strategy, rank=0)
     )
     
     # Create output directories
@@ -102,7 +125,7 @@ def transform_continuous_to_folder_structure(
             'root': parsed['root'],
             'roll_rule': roll_rule,
             'adjustment_method': 'unadjusted',  # DataBento provides unadjusted by default
-            'description': f"{parsed['root']} continuous front month (roll {roll_rule})"
+            'description': f"{parsed['root']} continuous front month (roll strategy: {roll_strategy}, rule: {roll_rule})"
         })
     
     inst_df = pd.DataFrame(inst_data).drop_duplicates(subset=['contract_series'])
@@ -136,18 +159,33 @@ def transform_continuous_to_folder_structure(
     return output_base
 
 
-def get_continuous_symbol(root: str, rank: int = 0) -> str:
+def _roll_strategy_to_code(roll_strategy: str) -> str:
+    """Map roll strategy identifiers to DataBento continuous symbol codes."""
+    normalized = roll_strategy.lower()
+    if normalized.startswith("calendar"):
+        return "c"
+    if normalized.startswith("volume"):
+        return "v"
+    if normalized.startswith("open-interest") or normalized.startswith("open_interest"):
+        return "o"
+    # Default to calendar roll if unknown
+    return "c"
+
+
+def get_continuous_symbol(root: str, rank: int = 0, roll_strategy: str = "calendar-2d") -> str:
     """
     Get the DataBento continuous contract symbol.
     
     Args:
         root: Futures root symbol (e.g., "ES")
         rank: 0 for front month, 1 for back month, etc.
+        roll_strategy: Roll strategy identifier (e.g., "calendar-2d", "volume")
         
     Returns:
         DataBento continuous symbol (e.g., "ES.c.0")
     """
-    return f"{root}.c.{rank}"
+    code = _roll_strategy_to_code(roll_strategy)
+    return f"{root}.{code}.{rank}"
 
 
 def transform_continuous_ohlcv_daily_to_folder_structure(
@@ -155,6 +193,7 @@ def transform_continuous_ohlcv_daily_to_folder_structure(
     output_base: Path,
     product: str = "ES_CONTINUOUS_DAILY_MDP3",
     roll_rule: str = "2_days_pre_expiry",
+    roll_strategy: str = "calendar-2d",
 ) -> Path:
     """
     Transform a downloaded continuous futures daily OHLCV parquet file into the folder structure
@@ -181,7 +220,8 @@ def transform_continuous_ohlcv_daily_to_folder_structure(
     logger.info(f"Processing {len(df)} rows, {df['symbol'].nunique()} unique symbols")
     
     # Filter for continuous contracts (ES.c.0, ES.c.1, etc.)
-    continuous_mask = df['symbol'].str.contains(r'\.c\.\d+', regex=True, na=False)
+    code = _roll_strategy_to_code(roll_strategy)
+    continuous_mask = df['symbol'].str.contains(rf'\.{code}\.\d+', regex=True, na=False)
     df_continuous = df[continuous_mask].copy()
     
     if df_continuous.empty:
@@ -192,7 +232,7 @@ def transform_continuous_ohlcv_daily_to_folder_structure(
     
     # Parse symbols and create contract_series
     df_continuous['contract_series'] = df_continuous['symbol'].apply(
-        lambda s: f"{parse_continuous_symbol(s)['root']}_FRONT_MONTH"
+        lambda s: make_contract_series(parse_continuous_symbol(s)['root'], roll_strategy, rank=0)
     )
     
     # Create output directories
@@ -228,7 +268,7 @@ def transform_continuous_ohlcv_daily_to_folder_structure(
             'root': parsed['root'],
             'roll_rule': roll_rule,
             'adjustment_method': 'unadjusted',  # DataBento provides unadjusted by default
-            'description': f"{parsed['root']} continuous front month (roll {roll_rule})"
+            'description': f"{parsed['root']} continuous front month (roll strategy: {roll_strategy}, rule: {roll_rule})"
         })
     
     inst_df = pd.DataFrame(inst_data).drop_duplicates(subset=['contract_series'])

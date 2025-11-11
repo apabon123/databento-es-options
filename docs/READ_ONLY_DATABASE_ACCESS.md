@@ -103,7 +103,7 @@ DB_PATH = Path(os.getenv(
     r"C:\Users\alexp\OneDrive\Gdrive\Trading\GitHub Projects\databento-es-options\data\silver\market.duckdb"
 ))
 
-def get_market_data(contract_series="ES_FRONT_MONTH", start_date=None, end_date=None):
+def get_market_data(contract_series="ES_FRONT_CALENDAR_2D", start_date=None, end_date=None):
     """Query market data from the central database."""
     con = duckdb.connect(str(DB_PATH), read_only=True)
     

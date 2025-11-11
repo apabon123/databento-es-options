@@ -368,7 +368,7 @@ def show_spread_analysis(con):
     print()
 
 
-def show_continuous_daily_bars(con, contract_series='ES_FRONT_MONTH'):
+def show_continuous_daily_bars(con, contract_series='ES_FRONT_CALENDAR_2D'):
     """Show daily bars for a continuous contract."""
     print("=" * 80)
     print(f"CONTINUOUS CONTRACT: {contract_series} - DAILY BARS")

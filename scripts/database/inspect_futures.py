@@ -15,6 +15,10 @@ import numpy as np
 from pathlib import Path
 import argparse
 from datetime import datetime
+import os
+
+
+DEFAULT_EXTERNAL_ROOT = Path(os.getenv("DATA_EXTERNAL_ROOT", "data/external")).resolve()
 
 
 def setup_display():
@@ -331,16 +335,17 @@ def show_contract_bars(con, contract_symbol='ESZ5'):
     
     print(f"Total bars: {len(contract_bars)}")
     print()
-    print("First 10 bars:")
-    print(contract_bars.head(10).to_string(index=False))
+    print("First 5 bars:")
+    print(contract_bars.head(5).to_string(index=False))
     print()
-    print("Last 10 bars:")
-    print(contract_bars.tail(10).to_string(index=False))
+    print("Last 5 bars:")
+    print(contract_bars.tail(5).to_string(index=False))
     print()
     
     # Summary statistics
-    print("Summary Statistics:")
-    print(contract_bars[['mid_open', 'mid_high', 'mid_low', 'mid_close']].describe().to_string())
+    print("Summary Statistics (min/median/max):")
+    summary = contract_bars[['mid_open', 'mid_high', 'mid_low', 'mid_close']].agg(['min', 'median', 'max']).T
+    print(summary.to_string())
     print()
 
 
@@ -408,16 +413,17 @@ def show_continuous_daily_bars(con, contract_series='ES_FRONT_CALENDAR_2D'):
     print(f"Total daily bars: {len(daily_bars)}")
     print(f"Date range: {daily_bars['trading_date'].min()} to {daily_bars['trading_date'].max()}")
     print()
-    print("First 10 bars:")
-    print(daily_bars.head(10).to_string(index=False))
+    print("First 5 bars:")
+    print(daily_bars.head(5).to_string(index=False))
     print()
-    print("Last 10 bars:")
-    print(daily_bars.tail(10).to_string(index=False))
+    print("Last 5 bars:")
+    print(daily_bars.tail(5).to_string(index=False))
     print()
     
     # Summary statistics
-    print("Summary Statistics:")
-    print(daily_bars[['open', 'high', 'low', 'close', 'volume']].describe().to_string())
+    print("Summary Statistics (min/median/max):")
+    summary = daily_bars[['open', 'high', 'low', 'close', 'volume']].agg(['min', 'median', 'max']).T
+    print(summary.to_string())
     print()
 
 
@@ -490,6 +496,59 @@ def show_continuous_daily_coverage(con):
         print()
 
 
+def show_continuous_root_rank_summary(con):
+    """Summarize continuous daily coverage by root and rank."""
+    table_check = con.execute("""
+        SELECT COUNT(*) as exists
+        FROM information_schema.tables 
+        WHERE table_name = 'g_continuous_bar_daily'
+    """).fetchone()[0]
+    
+    if table_check == 0:
+        return
+    
+    summary = con.execute("""
+        SELECT 
+            c.root,
+            COALESCE(try_cast(regexp_extract(c.contract_series, 'RANK_([0-9]+)', 1) AS INTEGER), 0) AS rank,
+            COUNT(*) AS bar_count,
+            COUNT(DISTINCT g.trading_date) AS trading_days,
+            MIN(g.trading_date) AS first_date,
+            MAX(g.trading_date) AS last_date,
+            SUM(g.volume) AS total_volume
+        FROM g_continuous_bar_daily g
+        JOIN dim_continuous_contract c ON g.contract_series = c.contract_series
+        GROUP BY 1, 2
+        ORDER BY c.root, rank
+    """).fetchdf()
+    
+    if len(summary) == 0:
+        return
+    
+    print("=" * 80)
+    print("CONTINUOUS DAILY COVERAGE BY ROOT / RANK")
+    print("=" * 80)
+    summary['rank'] = summary['rank'].astype(int)
+    print(summary.to_string(index=False))
+    print()
+
+    root_totals = summary.groupby('root', as_index=False).agg({
+        'bar_count': 'sum',
+        'trading_days': 'max',
+        'first_date': 'min',
+        'last_date': 'max',
+        'total_volume': 'sum'
+    }).rename(columns={
+        'bar_count': 'total_bars',
+        'trading_days': 'max_trading_days',
+        'total_volume': 'total_volume_sum'
+    })
+
+    print("ROOT TOTALS")
+    print(root_totals.to_string(index=False))
+    print()
+
+
 def show_quality_checks(con):
     """Show data quality checks."""
     print("=" * 80)
@@ -547,6 +606,160 @@ def show_quality_checks(con):
     print()
 
 
+def show_instrument_definitions(con):
+    """Show instrument definitions (contract specifications) from dim_instrument_definition."""
+    print("=" * 80)
+    print("INSTRUMENT DEFINITIONS (Contract Specifications)")
+    print("=" * 80)
+    
+    # Check if table exists
+    table_check = con.execute("""
+        SELECT COUNT(*) as exists
+        FROM information_schema.tables 
+        WHERE table_name = 'dim_instrument_definition'
+    """).fetchone()[0]
+    
+    if table_check == 0:
+        print("Instrument definitions table does not exist.")
+        print()
+        return
+    
+    # Get total count
+    total_count = con.execute("SELECT COUNT(*) as count FROM dim_instrument_definition").fetchone()[0]
+    
+    if total_count == 0:
+        print("No instrument definitions found in database.")
+        print()
+        return
+    
+    print(f"Total instrument definitions: {total_count}")
+    print("(One definition per instrument, regardless of how many times it appears in daily bars)")
+    print()
+    
+    # Get summary by asset
+    summary = con.execute("""
+        SELECT 
+            asset,
+            COUNT(*) as definition_count,
+            COUNT(DISTINCT native_symbol) as unique_symbols
+        FROM dim_instrument_definition
+        WHERE asset IS NOT NULL
+        GROUP BY asset
+        ORDER BY asset
+    """).fetchdf()
+    
+    if not summary.empty:
+        print("Summary by Asset:")
+        print(summary.to_string(index=False))
+        print()
+    
+    # Get first 5 and last 5 definitions
+    all_defs = con.execute("""
+        SELECT 
+            instrument_id,
+            native_symbol,
+            asset,
+            min_price_increment,
+            min_price_increment_amount,
+            expiration,
+            maturity_year,
+            maturity_month,
+            maturity_day,
+            contract_multiplier,
+            currency,
+            definition_date
+        FROM dim_instrument_definition
+        ORDER BY instrument_id
+    """).fetchdf()
+    
+    if len(all_defs) > 0:
+        print("First 5 definitions:")
+        print(all_defs.head(5).to_string(index=False))
+        print()
+        
+        if len(all_defs) > 5:
+            print("Last 5 definitions:")
+            print(all_defs.tail(5).to_string(index=False))
+            print()
+        
+        # Show sample by asset (if we have multiple assets)
+        assets = all_defs['asset'].dropna().unique()
+        if len(assets) > 1:
+            print("Sample definitions by asset:")
+            for asset in sorted(assets)[:5]:  # Show up to 5 assets
+                asset_defs = all_defs[all_defs['asset'] == asset].head(2)
+                if not asset_defs.empty:
+                    print(f"\n{asset} (showing {len(asset_defs)} of {len(all_defs[all_defs['asset'] == asset])}):")
+                    print(asset_defs[['instrument_id', 'native_symbol', 'expiration', 'maturity_year', 'maturity_month']].to_string(index=False))
+            print()
+    
+    # Check for SR3 specifically
+    sr3_check = con.execute("""
+        SELECT COUNT(*) as count
+        FROM dim_instrument_definition
+        WHERE asset = 'SR3'
+    """).fetchone()[0]
+    
+    if sr3_check > 0:
+        print(f"Found {sr3_check} SR3 (SOFR) instrument definitions")
+    else:
+        print("WARNING: No SR3 (SOFR) instrument definitions found")
+        print("   (This is expected if SR3 data hasn't been downloaded yet)")
+    print()
+
+
+def show_fred_summary(external_root: Path):
+    """Show summary of FRED parquet series stored on disk."""
+    fred_dir = external_root / "fred"
+    print("=" * 80)
+    print("FRED SERIES COVERAGE")
+    print("=" * 80)
+    
+    if not fred_dir.exists():
+        print(f"No FRED data directory found at {fred_dir}")
+        print()
+        return
+    
+    rows = []
+    for parquet_file in sorted(fred_dir.glob("*.parquet")):
+        try:
+            df = pd.read_parquet(parquet_file)
+        except Exception as exc:
+            print(f"  ⚠ Could not read {parquet_file.name}: {exc}")
+            continue
+        
+        if df.empty or "date" not in df.columns:
+            continue
+        
+        dates = pd.to_datetime(df["date"], errors="coerce").dropna()
+        if dates.empty:
+            continue
+        
+        last_updated = None
+        if "last_updated" in df.columns:
+            try:
+                last_updated = pd.to_datetime(df["last_updated"], errors="coerce").dropna().max()
+            except Exception:
+                last_updated = None
+        
+        rows.append({
+            "series_id": parquet_file.stem,
+            "rows": len(df),
+            "first_date": dates.min().date(),
+            "last_date": dates.max().date(),
+            "last_updated": last_updated,
+        })
+    
+    if not rows:
+        print("No valid FRED series found.")
+        print()
+        return
+    
+    summary = pd.DataFrame(rows).sort_values("series_id")
+    print(summary.to_string(index=False))
+    print()
+
+
 def export_sample_data(con, output_dir: Path):
     """Export sample data to CSV."""
     print("=" * 80)
@@ -599,6 +812,18 @@ def main():
         default='data/silver/market.duckdb',
         help='Path to DuckDB database (default: data/silver/market.duckdb)'
     )
+    parser.add_argument(
+        '--external-root',
+        type=str,
+        default=str(DEFAULT_EXTERNAL_ROOT),
+        help='Path to external data root (default: DATA_EXTERNAL_ROOT or data/external)'
+    )
+    parser.add_argument(
+        '--max-series',
+        type=int,
+        default=5,
+        help='Maximum number of continuous contract series samples to display (default: 5)'
+    )
     
     args = parser.parse_args()
     
@@ -610,6 +835,7 @@ def main():
     con = connect_to_db(db_path)
     if con is None:
         return 1
+    external_root = Path(args.external_root).resolve()
     
     try:
         # Run all inspections
@@ -626,6 +852,10 @@ def main():
         
         # Show continuous daily bars if they exist
         show_continuous_daily_coverage(con)
+        show_continuous_root_rank_summary(con)
+        
+        # Show instrument definitions (contract specifications)
+        show_instrument_definitions(con)
         
         # Show bars for each contract series found
         table_check = con.execute("""
@@ -641,15 +871,22 @@ def main():
                 ORDER BY contract_series
             """).fetchdf()
             
-            if len(contract_series_list) > 0:
-                for _, row in contract_series_list.iterrows():
-                    contract_series = row['contract_series']
+            if len(contract_series_list) > 0 and args.max_series != 0:
+                series_values = contract_series_list['contract_series'].tolist()
+                sample_series = series_values if args.max_series < 0 else series_values[:args.max_series]
+                if len(series_values) > len(sample_series):
+                    print(f"Displaying first {len(sample_series)} contract series (of {len(series_values)} total).")
+                    print()
+                for contract_series in sample_series:
                     show_continuous_daily_bars(con, contract_series)
         
         # Export if requested
         if args.export:
             output_dir = Path("data/gold")
             export_sample_data(con, output_dir)
+        
+        # External data summaries
+        show_fred_summary(external_root)
         
         print("=" * 80)
         print("INSPECTION COMPLETE")

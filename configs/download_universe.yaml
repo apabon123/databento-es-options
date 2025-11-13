@@ -1,0 +1,75 @@
+dataset: GLBX.MDP3
+schema: ohlcv-1d
+stype_in: continuous
+default_start: 2015-01-01
+default_end: 2025-12-31
+roots:
+  # --- EQUITY (calendar roll) ---
+  ES:
+    roll_rule: .c.
+    ranks: [0, 1]
+    comment: S&P 500 e-mini — equity carry (r - q)
+  NQ:
+    roll_rule: .c.
+    ranks: [0, 1]
+    comment: Nasdaq-100 e-mini
+  RTY:
+    roll_rule: .c.
+    ranks: [0, 1]
+    comment: Russell 2000 e-mini
+
+  # --- RATES (volume roll) ---
+  ZT:
+    roll_rule: .v.
+    ranks: [0, 1]
+    comment: 2Y Treasury note
+  ZF:
+    roll_rule: .v.
+    ranks: [0, 1]
+    comment: 5Y Treasury note
+  ZN:
+    roll_rule: .v.
+    ranks: [0, 1]
+    comment: 10Y Treasury note
+  UB:
+    roll_rule: .v.
+    ranks: [0, 1]
+    comment: Ultra-bond (30Y+)
+
+  # --- COMMODITIES (volume roll) ---
+  CL:
+    roll_rule: .v.
+    ranks: [0, 1, 2, 3]
+    comment: WTI crude oil — strong seasonality/curve
+  GC:
+    roll_rule: .v.
+    ranks: [0, 1, 2]
+    comment: COMEX gold
+
+  # --- FX (calendar roll) ---
+  6E:
+    roll_rule: .c.
+    ranks: [0, 1]
+    comment: EUR/USD — carry via rate differential
+  6J:
+    roll_rule: .c.
+    ranks: [0, 1]
+    comment: JPY/USD
+  6B:
+    roll_rule: .c.
+    ranks: [0, 1]
+    comment: GBP/USD
+
+  # --- STIR / SOFR strip (calendar roll) ---
+  SR3:
+    roll_rule: .c.
+    ranks: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    comment: 3M SOFR — white/red/green/gold (~3y curve)
+
+  # --- VOL (optional; calendar roll) ---
+  VX:
+    roll_rule: .c.
+    ranks: [0, 1, 2]
+    comment: VIX futures — VRP/vol-carry
+    optional: true
+

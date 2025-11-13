@@ -1,6 +1,6 @@
 # DataBento ES Options & Futures Data Pipeline
 
-Download, transform, and store CME ES (E-mini S&P 500) options and futures BBO-1m data in a DuckDB warehouse.
+Download, transform, and store CME futures, options, and continuous daily OHLCV data from DataBento into a DuckDB warehouse.
 
 ## Quick Start
 
@@ -28,6 +28,27 @@ Copy-Item .env.example .env
 - **Gold** (aggregated): `DATA_GOLD_ROOT` - Final 1-minute bar outputs
 
 ### 2. Download & Ingest Data (NEW - Recommended)
+
+**Config-Driven Continuous Daily Universe:**
+```powershell
+# Download the configured universe (see configs/download_universe.yaml)
+python scripts/download/download_universe_daily_ohlcv.py --start 2015-01-01 --end 2025-12-31
+
+# Limit to specific roots
+python scripts/download/download_universe_daily_ohlcv.py --roots ES,NQ,ZN --start 2020-01-01 --end 2020-12-31
+
+# Skip optional symbols (e.g., VX)
+python scripts/download/download_universe_daily_ohlcv.py --exclude-optional --weeks 8
+```
+
+**FRED Macro Series (external data):**
+```powershell
+# Fetch the default macro set defined in configs/fred_series.yaml
+python scripts/download/download_fred_series.py
+
+# Override the series list and date window
+python scripts/download/download_fred_series.py --series VIXCLS,FEDFUNDS --start 2000-01-01 --end 2025-12-31
+```
 
 **ES Options - All-in-One Wrapper:**
 ```powershell
@@ -110,13 +131,23 @@ databento-es-options/
 │   └── utils/                              # Utilities
 │       ├── logging_config.py               # Logging setup
 │       ├── db_utils.py                     # Database utilities (NEW)
-│       └── data_transform.py               # Data transformation (NEW)
+│       ├── data_transform.py               # Data transformation (NEW)
+│       └── continuous_transform.py         # Continuous contract helpers
 ├── scripts/                                # User-facing scripts
 │   ├── download_and_ingest_options.py      # All-in-one options wrapper (NEW)
 │   ├── download_and_ingest_futures.py      # All-in-one futures wrapper (NEW)
 │   ├── inspect_futures.py                  # Inspect futures data in DB (NEW)
 │   ├── download_last_week.py               # Download only (legacy, use download_and_ingest_*.py instead)
+│   ├── download_universe_daily_ohlcv.py    # Config-driven OHLCV downloader (NEW)
+│   ├── download_fred_series.py             # FRED macro downloader (NEW)
 │   └── analyze_data.py                     # Validation runner
+├── configs/                                # High-level universe/config metadata (NEW)
+│   ├── download_universe.yaml              # Roots, roll rules, and rank ranges
+│   ├── fred_series.yaml                    # FRED macro series manifest (NEW)
+│   ├── fred_settings.yaml                  # FRED API configuration (NEW)
+│   ├── rates_dv01.yaml                     # Duration proxies for curve hedging
+│   ├── contracts.yaml                      # Additional symbol aliases
+│   └── universe.yaml                       # Market data discovery configuration
 ├── pipelines/                              # Database pipeline
 │   ├── products/                           # Product-specific loaders
 │   │   ├── es_options_mdp3.py              # ES options loader
@@ -156,6 +187,86 @@ databento-es-options/
 ✅ **Quality checks** - Validates symbols, strikes, maturities, and price data  
 ✅ **Clean data** - Removes bad prices, checks spreads, identifies outliers  
 
+## Data Architecture
+
+The project uses a **Bronze-Silver-Gold** data architecture:
+
+```
+data/
+├── raw/          (Bronze Layer) - Raw files from DataBento
+├── silver/       (Silver Layer) - DuckDB database
+└── gold/         (Gold Layer) - Transformed, organized Parquet files
+```
+
+### Bronze Layer (`data/raw/`)
+
+**Direct downloads from DataBento:**
+- `glbx-mdp3-YYYY-MM-DD.bbo-1m.fullday.parquet` - Full trading day data
+- `glbx-mdp3-YYYY-MM-DD.bbo-1m.last5m.parquet` - Last 5 minutes of trading day
+
+**Transformed folder structure** (after transformation):
+```
+data/raw/glbx-mdp3-2025-10-27/
+├── continuous_instruments/
+│   └── 2025-10-27.parquet      # Contract definitions
+├── continuous_quotes_l1/
+│   └── 2025-10-27.parquet      # Level 1 quotes (bid/ask)
+└── continuous_trades/           # Trade data (if available)
+```
+
+**For ES Futures:**
+```
+data/raw/glbx-mdp3-2025-10-20/
+├── fut_instruments/
+│   └── 2025-10-20.parquet
+├── fut_quotes_l1/
+│   └── 2025-10-20.parquet
+└── fut_trades/
+```
+
+**For ES Options:**
+```
+data/raw/glbx-mdp3-YYYY-MM-DD/
+├── instruments/
+│   └── YYYY-MM-DD.parquet
+├── quotes_l1/
+│   └── YYYY-MM-DD.parquet
+└── trades/
+```
+
+### Silver Layer (`data/silver/`)
+
+- `market.duckdb` - The main DuckDB database file
+- Stores all ingested market data in normalized tables
+- Contains fact tables (quotes, trades) and dimension tables (instruments)
+- Stores aggregated "gold layer" tables (1-minute bars)
+
+### Gold Layer (`data/gold/`)
+
+- Mirror of `data/raw/` structure with same folder organization
+- Ready-to-query Parquet files organized by date and product type
+- Can be queried directly with DuckDB without going through the database
+
+### Data Flow
+
+```
+DataBento API
+    ↓
+data/raw/glbx-mdp3-YYYY-MM-DD.bbo-1m.fullday.parquet
+    ↓ (transform)
+data/raw/glbx-mdp3-YYYY-MM-DD/
+    ├── instruments/YYYY-MM-DD.parquet
+    ├── quotes_l1/YYYY-MM-DD.parquet
+    └── trades/
+    ↓ (copy to gold)
+data/gold/glbx-mdp3-YYYY-MM-DD/
+    ↓ (ingest)
+data/silver/market.duckdb
+    ├── f_quote_l1 (fact table)
+    ├── dim_instrument (dimension table)
+    └── g_bar_1m (gold layer - aggregated bars)
+```
+
 ## Data Schema
 
 Each parquet file contains:
@@ -192,11 +303,55 @@ result = analyze_file(Path("data/raw/glbx-mdp3-2025-10-20.bbo-1m.last5m.parquet"
 print(result)
 ```
 
+## Common Workflows
+
+### Initial Setup (First Time)
+```powershell
+# 1. Download last 3 months of data
+python scripts/download/download_and_ingest_options.py --start 2025-08-01 --end 2025-10-31
+
+# 2. Check what you got
+python scripts/download/download_and_ingest_options.py --summary
+```
+
+### Daily Update
+```powershell
+# Download yesterday's data (skips duplicates automatically)
+python scripts/download/download_and_ingest_options.py --weeks 1 --yes
+```
+
+### After Vacation (Catch-up)
+```powershell
+# Download gap (e.g., 2 weeks ago to yesterday)
+python scripts/download/download_and_ingest_options.py --weeks 2 --yes
+```
+
+### Fix Ingestion Issues
+```powershell
+# If download succeeded but ingestion failed, just re-ingest
+python scripts/download/download_and_ingest_options.py --ingest-only
+```
+
+### Cost Estimates
+
+Typical costs for ES Options (BBO-1m, last 5 minutes per day):
+- **Per day**: ~$0.02-0.03
+- **Per week** (5 days): ~$0.10-0.15
+- **Per month** (20 days): ~$0.40-0.60
+
+ES Futures are typically cheaper (fewer symbols):
+- **Per day**: ~$0.01
+- **Per week**: ~$0.05
+- **Per month**: ~$0.20
+
+The wrapper always shows exact costs before downloading!
+
 ## Documentation
 
-- [RUNBOOK.md](docs/RUNBOOK.md) - Detailed workflows and procedures
-- [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - Common issues and solutions
-- [DATABENTO_ISSUE.md](docs/DATABENTO_ISSUE.md) - API quirks and clarifications
+- [QUICK_REFERENCE.md](QUICK_REFERENCE.md) - Quick command reference
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - Common issues and solutions
+- [docs/ROLL_STRATEGY_GUIDE.md](docs/ROLL_STRATEGY_GUIDE.md) - Roll strategy implementation guide
+- [docs/INSTRUMENT_DEFINITIONS.md](docs/INSTRUMENT_DEFINITIONS.md) - Instrument definitions documentation
 
 ## Requirements
 

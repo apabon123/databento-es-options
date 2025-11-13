@@ -199,8 +199,12 @@ def transform_and_ingest(downloaded_by_root, roll_strategy, re_transform=False):
                 logger.info(f"  Transforming {parquet_file.name}...")
                 transform_continuous_ohlcv_daily_to_folder_structure(
                     parquet_file=parquet_file,
-                    output_dir=output_dir,
-                    root=root
+                    output_base=output_dir,
+                    product=PRODUCT,
+                    roll_rule=roll_config['db_suffix'],
+                    roll_strategy=roll_strategy,
+                    output_mode="legacy",
+                    re_transform=re_transform,
                 )
                 logger.info(f"    Saved to {output_dir}")
                 

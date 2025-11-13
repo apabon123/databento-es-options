@@ -1,0 +1,32 @@
+# Default configuration for FRED series downloads
+#
+# Add additional series or override per-series options (e.g. frequency) here.
+# Each entry should contain at minimum the `series_id` key.
+#
+# Optional keys:
+#   name:        Human friendly label
+#   frequency:   Override frequency (default: daily)
+#   transform:   Transformation to apply prior to normalization
+#
+series:
+  VIXCLS:
+    name: CBOE Volatility Index (VIX)
+  VXVCLS:
+    name: CBOE 3-Month Volatility Index (VXV)
+  FEDFUNDS:
+    name: Effective Federal Funds Rate
+  DGS2:
+    name: Treasury Constant Maturity Rate - 2 Year
+  DGS10:
+    name: Treasury Constant Maturity Rate - 10 Year
+  BAMLH0A0HYM2:
+    name: ICE BofA US High Yield Index Option-Adjusted Spread
+  TEDRATE:
+    name: TED Spread
+  CPIAUCSL:
+    name: Consumer Price Index for All Urban Consumers
+  UNRATE:
+    name: Unemployment Rate
+  DTWEXBGS:
+    name: "Trade Weighted U.S. Dollar Index: Broad, Goods"
+

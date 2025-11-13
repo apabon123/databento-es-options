@@ -1,0 +1,9 @@
+ZT:
+  dv01: 40   # USD per 1 bp move per contract
+ZF:
+  dv01: 65
+ZN:
+  dv01: 90
+UB:
+  dv01: 150
+

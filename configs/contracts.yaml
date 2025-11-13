@@ -1,0 +1,10 @@
+aliases:
+  SR3:
+    description: CME SOFR (SR3) short-term interest rate futures
+    category: stir
+    dataset: GLBX.MDP3
+  VX:
+    description: CBOE VIX futures
+    category: volatility
+    dataset: GLBX.MDP3
+

@@ -374,14 +374,16 @@ def transform_and_ingest(downloaded_by_root: dict, transformed_dirs_override: li
                 
                 try:
                     logger.info(f"Transforming {parquet_file.name}...")
-                    transform_continuous_ohlcv_daily_to_folder_structure(
-                        parquet_file,
-                        output_dir,
+                    results = transform_continuous_ohlcv_daily_to_folder_structure(
+                        parquet_file=parquet_file,
+                        output_base=output_dir,
                         product=PRODUCT,
                         roll_rule=roll_rule,
                         roll_strategy=roll_strategy,
+                        output_mode="legacy",
+                        re_transform=re_transform,
                     )
-                    transformed_dirs.append(output_dir)
+                    transformed_dirs.extend(results)
                 except Exception as e:
                     logger.error(f"  Failed to transform {parquet_file.name}: {e}")
                     continue

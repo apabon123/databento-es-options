@@ -92,8 +92,12 @@ def transform_continuous_to_folder_structure(
     logger.info(f"Kept {len(df_continuous)} rows with continuous contract symbols")
     
     # Parse symbols
-    df_continuous['contract_series'] = df_continuous['symbol'].apply(
-        lambda s: make_contract_series(parse_continuous_symbol(s)['root'], roll_strategy, rank=0)
+    parsed_series = df_continuous['symbol'].apply(parse_continuous_symbol)
+    df_continuous['_root'] = parsed_series.apply(lambda p: p['root'])
+    df_continuous['_rank'] = parsed_series.apply(lambda p: p.get('rank', 0))
+    df_continuous['contract_series'] = df_continuous.apply(
+        lambda row: make_contract_series(row['_root'], roll_strategy, row['_rank']),
+        axis=1,
     )
     
     # Create output directories
@@ -115,20 +119,22 @@ def transform_continuous_to_folder_structure(
     
     # --- 1) Instrument definitions ---
     # Create one row per unique contract series
-    unique_series = df_continuous['contract_series'].unique()
-    inst_data = []
-    
-    for series in unique_series:
-        parsed = parse_continuous_symbol(df_continuous[df_continuous['contract_series'] == series]['symbol'].iloc[0])
-        inst_data.append({
+    inst_rows = []
+    for series, group in df_continuous.groupby('contract_series'):
+        root = group['_root'].iloc[0]
+        rank = int(group['_rank'].iloc[0])
+        description_rank = "front month" if rank == 0 else f"rank {rank}"
+        inst_rows.append({
             'contract_series': series,
-            'root': parsed['root'],
+            'root': root,
             'roll_rule': roll_rule,
             'adjustment_method': 'unadjusted',  # DataBento provides unadjusted by default
-            'description': f"{parsed['root']} continuous front month (roll strategy: {roll_strategy}, rule: {roll_rule})"
+            'description': f"{root} continuous {description_rank} (roll strategy: {roll_strategy}, rule: {roll_rule})"
         })
     
-    inst_df = pd.DataFrame(inst_data).drop_duplicates(subset=['contract_series'])
+    inst_df = pd.DataFrame(inst_rows).drop_duplicates(subset=['contract_series'])
+    df_continuous = df_continuous.drop(columns=['_root', '_rank'])
+    df_continuous = df_continuous.drop(columns=['_root', '_rank'])
     inst_path = inst_dir / f"{output_date}.parquet"
     inst_df.to_parquet(inst_path, index=False)
     logger.info(f"Wrote {len(inst_df)} continuous contracts to {inst_path.relative_to(output_base.parent)}")
@@ -194,7 +200,9 @@ def transform_continuous_ohlcv_daily_to_folder_structure(
     product: str = "ES_CONTINUOUS_DAILY_MDP3",
     roll_rule: str = "2_days_pre_expiry",
     roll_strategy: str = "calendar-2d",
-) -> Path:
+    output_mode: str = "legacy",
+    re_transform: bool = False,
+) -> list[Path]:
     """
     Transform a downloaded continuous futures daily OHLCV parquet file into the folder structure
     expected by the ES_CONTINUOUS_DAILY_MDP3 loader.
@@ -206,7 +214,7 @@ def transform_continuous_ohlcv_daily_to_folder_structure(
         roll_rule: Roll rule description
         
     Returns:
-        Path to the created directory
+        List of directories created (one per contract series when partitioned, otherwise single entry)
     """
     logger.info(f"Transforming {parquet_file.name} for {product}...")
     
@@ -231,23 +239,16 @@ def transform_continuous_ohlcv_daily_to_folder_structure(
     logger.info(f"Kept {len(df_continuous)} rows with continuous contract symbols")
     
     # Parse symbols and create contract_series
-    df_continuous['contract_series'] = df_continuous['symbol'].apply(
-        lambda s: make_contract_series(parse_continuous_symbol(s)['root'], roll_strategy, rank=0)
+    parsed_series = df_continuous['symbol'].apply(parse_continuous_symbol)
+    df_continuous['_root'] = parsed_series.apply(lambda p: p['root'])
+    df_continuous['_rank'] = parsed_series.apply(lambda p: p.get('rank', 0))
+    df_continuous['contract_series'] = df_continuous.apply(
+        lambda row: make_contract_series(row['_root'], roll_strategy, row['_rank']),
+        axis=1,
     )
     
-    # Create output directories
-    inst_dir = output_base / "continuous_instruments"
-    bars_daily_dir = output_base / "continuous_bars_daily"
-    
-    inst_dir.mkdir(parents=True, exist_ok=True)
-    bars_daily_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Extract date from filename for output filename
-    # Format: glbx-mdp3-{root}-YYYY-MM-DD.ohlcv-1d.fullday.parquet
     try:
-        # Get the filename without extension
-        filename_base = parquet_file.stem.split('.')[0]  # e.g., "glbx-mdp3-es-2025-01-06"
-        # Extract the last 3 parts (YYYY-MM-DD)
+        filename_base = parquet_file.stem.split('.')[0]
         date_part = filename_base.split('-')[-3:]
         output_date = '-'.join(date_part)
         trading_date_from_filename = date.fromisoformat(output_date)
@@ -256,59 +257,116 @@ def transform_continuous_ohlcv_daily_to_folder_structure(
         output_date = date.today().isoformat()
         trading_date_from_filename = date.today()
     
-    # --- 1) Instrument definitions ---
-    # Create one row per unique contract series
-    unique_series = df_continuous['contract_series'].unique()
-    inst_data = []
+    outputs: list[Path] = []
     
-    for series in unique_series:
-        parsed = parse_continuous_symbol(df_continuous[df_continuous['contract_series'] == series]['symbol'].iloc[0])
-        inst_data.append({
-            'contract_series': series,
-            'root': parsed['root'],
-            'roll_rule': roll_rule,
-            'adjustment_method': 'unadjusted',  # DataBento provides unadjusted by default
-            'description': f"{parsed['root']} continuous front month (roll strategy: {roll_strategy}, rule: {roll_rule})"
+    if output_mode == "legacy":
+        if output_base.exists() and not re_transform:
+            logger.info("  ↺ Skipping transformation (exists and re_transform=False)")
+            return [output_base]
+        
+        inst_dir = output_base / "continuous_instruments"
+        bars_daily_dir = output_base / "continuous_bars_daily"
+        inst_dir.mkdir(parents=True, exist_ok=True)
+        bars_daily_dir.mkdir(parents=True, exist_ok=True)
+        
+        inst_rows = []
+        for series, group in df_continuous.groupby('contract_series'):
+            root = group['_root'].iloc[0]
+            rank = int(group['_rank'].iloc[0])
+            description_rank = "front month" if rank == 0 else f"rank {rank}"
+            inst_rows.append({
+                'contract_series': series,
+                'root': root,
+                'roll_rule': roll_rule,
+                'adjustment_method': 'unadjusted',
+                'description': f"{root} continuous {description_rank} (roll strategy: {roll_strategy}, rule: {roll_rule})"
+            })
+        
+        inst_df = pd.DataFrame(inst_rows).drop_duplicates(subset=['contract_series'])
+        inst_path = inst_dir / f"{output_date}.parquet"
+        inst_df.to_parquet(inst_path, index=False)
+        logger.info(f"Wrote {len(inst_df)} continuous contracts to {inst_path.relative_to(output_base.parent)}")
+        
+        df_continuous['trading_date'] = trading_date_from_filename
+        bar_df = pd.DataFrame({
+            'trading_date': df_continuous['trading_date'],
+            'contract_series': df_continuous['contract_series'],
+            'underlying_instrument_id': df_continuous['instrument_id'],
+            'open': df_continuous['open'],
+            'high': df_continuous['high'],
+            'low': df_continuous['low'],
+            'close': df_continuous['close'],
+            'volume': df_continuous['volume'].astype('int64'),
         })
+        bar_df = bar_df.groupby(['trading_date', 'contract_series'], as_index=False).agg({
+            'underlying_instrument_id': 'first',
+            'open': 'first',
+            'high': 'max',
+            'low': 'min',
+            'close': 'last',
+            'volume': 'sum',
+        })
+        bar_path = bars_daily_dir / f"{output_date}.parquet"
+        bar_df.to_parquet(bar_path, index=False)
+        logger.info(f"Wrote {len(bar_df)} daily bars to {bar_path.relative_to(output_base.parent)}")
+        outputs.append(output_base)
+    else:
+        for series, group in df_continuous.groupby('contract_series'):
+            root_val = group['_root'].iloc[0]
+            rank_val = int(group['_rank'].iloc[0])
+            symbol_val = group['symbol'].iloc[0]
+            description_rank = "front month" if rank_val == 0 else f"rank {rank_val}"
+            
+            target_dir = output_base / f"rank={rank_val}" / output_date
+            if target_dir.exists() and not re_transform:
+                logger.debug(f"  ↺ Skipping {target_dir} (exists and re_transform=False)")
+                outputs.append(target_dir)
+                continue
+            
+            if target_dir.exists() and re_transform:
+                logger.debug(f"  ⟳ Re-transforming {target_dir}")
+                import shutil
+                shutil.rmtree(target_dir, ignore_errors=True)
+            
+            inst_dir = target_dir / "continuous_instruments"
+            bars_daily_dir = target_dir / "continuous_bars_daily"
+            inst_dir.mkdir(parents=True, exist_ok=True)
+            bars_daily_dir.mkdir(parents=True, exist_ok=True)
+            
+            inst_df = pd.DataFrame([{
+                'contract_series': series,
+                'root': root_val,
+                'rank': rank_val,
+                'roll_rule': roll_rule,
+                'roll_strategy': roll_strategy,
+                'adjustment_method': 'unadjusted',
+                'description': f"{root_val} continuous {description_rank} (roll strategy: {roll_strategy}, rule: {roll_rule})"
+            }])
+            inst_path = inst_dir / f"{output_date}.parquet"
+            inst_df.to_parquet(inst_path, index=False)
+            logger.info(f"Wrote contract metadata to {inst_path.relative_to(output_base)}")
+            
+            agg_row = {
+                'trading_date': trading_date_from_filename,
+                'root': root_val,
+                'symbol': symbol_val,
+                'rank': rank_val,
+                'db_symbol': series,
+                'contract_series': series,
+                'roll_strategy': roll_strategy,
+                'underlying_instrument_id': group['instrument_id'].iloc[0],
+                'open': group['open'].iloc[0],
+                'high': group['high'].max(),
+                'low': group['low'].min(),
+                'close': group['close'].iloc[-1],
+                'volume': int(group['volume'].sum()),
+            }
+            bar_df = pd.DataFrame([agg_row])
+            bar_path = bars_daily_dir / f"{output_date}.parquet"
+            bar_df.to_parquet(bar_path, index=False)
+            logger.info(f"Wrote daily bars to {bar_path.relative_to(output_base)}")
+            
+            outputs.append(target_dir)
     
-    inst_df = pd.DataFrame(inst_data).drop_duplicates(subset=['contract_series'])
-    inst_path = inst_dir / f"{output_date}.parquet"
-    inst_df.to_parquet(inst_path, index=False)
-    logger.info(f"Wrote {len(inst_df)} continuous contracts to {inst_path.relative_to(output_base.parent)}")
-    
-    # --- 2) Daily Bars ---
-    # Map the OHLCV data to our schema
-    # For ohlcv-1d schema, DataBento doesn't include a date column, so we ALWAYS use the filename date
-    # This is the authoritative source for the trading date
-    logger.info(f"Using date from filename for OHLCV-1d data: {trading_date_from_filename}")
-    df_continuous['trading_date'] = trading_date_from_filename
-    
-    # Map OHLCV columns - DataBento uses open, high, low, close, volume
-    bar_df = pd.DataFrame({
-        'trading_date': df_continuous['trading_date'],
-        'contract_series': df_continuous['contract_series'],
-        'underlying_instrument_id': df_continuous['instrument_id'],
-        'open': df_continuous['open'],
-        'high': df_continuous['high'],
-        'low': df_continuous['low'],
-        'close': df_continuous['close'],
-        'volume': df_continuous['volume'].astype('int64'),
-    })
-    
-    # Group by trading_date and contract_series in case there are multiple rows per day
-    # (shouldn't happen with daily data, but just in case)
-    bar_df = bar_df.groupby(['trading_date', 'contract_series'], as_index=False).agg({
-        'underlying_instrument_id': 'first',
-        'open': 'first',  # Use first open of the day
-        'high': 'max',
-        'low': 'min',
-        'close': 'last',  # Use last close of the day
-        'volume': 'sum',
-    })
-    
-    bar_path = bars_daily_dir / f"{output_date}.parquet"
-    bar_df.to_parquet(bar_path, index=False)
-    logger.info(f"Wrote {len(bar_df)} daily bars to {bar_path.relative_to(output_base.parent)}")
-    
-    logger.info(f"Transformation complete: {output_base.relative_to(output_base.parent.parent)}")
-    return output_base
+    logger.info("Transformation complete")
+    return outputs

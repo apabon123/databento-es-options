@@ -1,0 +1,20 @@
+continuous_daily:
+  dataset: GLBX.MDP3
+  schema: ohlcv-1d
+  stype_in: continuous
+  roots:
+    - ES
+    - NQ
+    - RTY
+    - ZT
+    - ZF
+    - ZN
+    - UB
+    - CL
+    - GC
+    - 6E
+    - 6J
+    - 6B
+    - SR3
+    - VX
+

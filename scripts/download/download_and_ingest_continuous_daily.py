@@ -189,20 +189,18 @@ def transform_and_ingest(downloaded_files: list):
             logger.error(f"Could not parse date from {parquet_file.name}")
             continue
         
-        if output_dir.exists():
-            logger.info(f"  {output_dir.name} already exists, skipping transformation")
-            transformed_dirs.append(output_dir)
-            continue
-        
         try:
             logger.info(f"Transforming {parquet_file.name}...")
-            transform_continuous_ohlcv_daily_to_folder_structure(
+            results = transform_continuous_ohlcv_daily_to_folder_structure(
                 parquet_file,
                 output_dir,
                 product=PRODUCT,
-                roll_rule=ROLL_RULE
+                roll_rule=ROLL_RULE,
+                roll_strategy="calendar-2d",
+                output_mode="legacy",
+                re_transform=re_transform,
             )
-            transformed_dirs.append(output_dir)
+            transformed_dirs.extend(results)
         except Exception as e:
             logger.error(f"  Failed to transform {parquet_file.name}: {e}")
             continue

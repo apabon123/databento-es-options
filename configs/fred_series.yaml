@@ -29,4 +29,25 @@ series:
     name: Unemployment Rate
   DTWEXBGS:
     name: "Trade Weighted U.S. Dollar Index: Broad, Goods"
+  # Phase 2: Treasury rates
+  DGS5:
+    name: "5-Year Treasury Constant Maturity Rate"
+  DGS30:
+    name: "30-Year Treasury Constant Maturity Rate"
+  # Phase 3: VIX Term Structure (CBOE via FRED)
+  # NOTE: VIX9D and VVIX are not available via FRED API - they may need to be
+  # downloaded directly from CBOE or may have different series IDs.
+  # VIX9D:
+  #   name: "9-Day CBOE Volatility Index (VIX)"
+  # VVIX:
+  #   name: "CBOE VIX Volatility Index (Vol-of-Vol)"
+  # Phase 4-5: Macro factors
+  T10Y2Y:
+    name: "10-Year Treasury Constant Maturity Minus 2-Year Treasury Constant Maturity"
+  T10YIE:
+    name: "10-Year Breakeven Inflation Rate"
+  T5YIFR:
+    name: "5-Year, 5-Year Forward Inflation Expectation Rate"
+  BAMLC0A0CM:
+    name: "ICE BofA US Corporate Index Option-Adjusted Spread"
 

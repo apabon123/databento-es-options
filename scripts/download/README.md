@@ -1,58 +1,23 @@
 # Download Scripts
 
-Scripts for downloading data from DataBento and ingesting into the database.
+Data download & ingestion. See [QUICK_REFERENCE.md](../../QUICK_REFERENCE.md#download-commands) for full documentation.
 
 ## Scripts
 
-### `download_and_ingest_options.py`
-Main wrapper script for downloading and ingesting ES options data.
+| Script | Purpose |
+|--------|---------|
+| `download_and_ingest_options.py` | ES options (BBO-1m) |
+| `download_and_ingest_futures.py` | ES futures (BBO-1m) |
+| `download_and_ingest_continuous.py` | ES continuous intraday |
+| `download_and_ingest_continuous_daily.py` | Continuous daily OHLCV |
+| `download_universe_daily_ohlcv.py` | Full universe daily OHLCV |
+| `download_fred_series.py` | FRED macro series |
+| `download_last_week.py` | Legacy: download only (no ingest) |
 
-**Usage:**
+## Quick Examples
+
 ```powershell
-# Download last 3 weeks
 python scripts/download/download_and_ingest_options.py --weeks 3
-
-# Download specific date range
-python scripts/download/download_and_ingest_options.py --start 2025-09-01 --end 2025-09-30
-
-# Just ingest existing raw data (no download)
-python scripts/download/download_and_ingest_options.py --ingest-only
-
-# View database summary
-python scripts/download/download_and_ingest_options.py --summary
+python scripts/download/download_universe_daily_ohlcv.py --start 2020-01-01
+python scripts/download/download_fred_series.py
 ```
-
-### `download_and_ingest_futures.py`
-Main wrapper script for downloading and ingesting ES futures data.
-
-**Usage:**
-```powershell
-# Download last week
-python scripts/download/download_and_ingest_futures.py --weeks 1
-
-# Download specific contracts
-python scripts/download/download_and_ingest_futures.py --weeks 1 --symbols ESZ5,ESH6
-```
-
-### `download_and_ingest_continuous.py`
-Main wrapper script for downloading and ingesting ES continuous futures data.
-
-**Usage:**
-```powershell
-# Download full day continuous futures
-python scripts/download/download_and_ingest_continuous.py --weeks 1
-
-# Download last 5 minutes only
-python scripts/download/download_and_ingest_continuous.py --weeks 1 --last-minutes
-```
-
-### `download_last_week.py`
-**Legacy script** - Quick script to download last week's 5-minute ES options data (download only, no ingestion).
-
-**Note:** This is superseded by `download_and_ingest_options.py --weeks 1` which handles both download and ingestion.
-
-**Usage:**
-```powershell
-python scripts/download/download_last_week.py
-```
-

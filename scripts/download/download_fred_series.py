@@ -84,7 +84,11 @@ def resolve_date(value: Optional[str], fallback: Optional[str], default: date) -
     if value:
         return date.fromisoformat(value)
     if fallback:
-        return date.fromisoformat(fallback)
+        # Handle case where fallback might be a string or already a date object
+        if isinstance(fallback, str):
+            return date.fromisoformat(fallback)
+        elif isinstance(fallback, date):
+            return fallback
     return default
 
 
@@ -179,6 +183,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     parser.add_argument("--start", type=str, help="Start date (YYYY-MM-DD). Overrides config default.")
     parser.add_argument("--end", type=str, help="End date (YYYY-MM-DD). Overrides config default.")
     parser.add_argument("--force", action="store_true", help="Re-download even if output already exists.")
+    parser.add_argument("--ingest", action="store_true", help="Ingest downloaded series into database after download.")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging.")
 
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -208,6 +213,28 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             LOGGER.error("Failed to process %s: %s", sid, exc)
 
     LOGGER.info("FRED download complete.")
+    
+    # Ingest into database if requested
+    if args.ingest:
+        LOGGER.info("Ingesting FRED series into database...")
+        try:
+            import subprocess
+            cmd = [sys.executable, str(PROJECT_ROOT / "scripts" / "database" / "ingest_fred_series.py")]
+            if args.series:
+                cmd.extend(["--series", args.series])
+            if args.force:
+                cmd.append("--force")
+            if args.verbose:
+                cmd.append("--verbose")
+            result = subprocess.run(cmd, cwd=PROJECT_ROOT)
+            if result.returncode != 0:
+                LOGGER.warning("FRED ingestion completed with warnings (exit code: %d)", result.returncode)
+            else:
+                LOGGER.info("FRED ingestion complete.")
+        except Exception as exc:
+            LOGGER.error("Failed to ingest FRED data: %s", exc)
+            LOGGER.info("You can manually ingest later with: python scripts/database/ingest_fred_series.py")
+    
     return 0
 
 

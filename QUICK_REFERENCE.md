@@ -109,13 +109,19 @@ python scripts/download/download_universe_daily_ohlcv.py --weeks 4
 # Download all configured series
 python scripts/download/download_fred_series.py
 
+# Download and ingest in one step
+python scripts/download/download_fred_series.py --ingest
+
 # Download specific series
-python scripts/download/download_fred_series.py --series VIXCLS,FEDFUNDS
+python scripts/download/download_fred_series.py --series VIXCLS,FEDFUNDS --ingest
+
+# Download spot indices (SPX, NDX)
+python scripts/download/download_fred_series.py --series SP500,NASDAQ100 --ingest
 
 # Custom date range
 python scripts/download/download_fred_series.py --series VIXCLS --start 2000-01-01 --end 2025-12-31
 
-# Ingest parquet files into database
+# Ingest parquet files into database (separate step)
 python scripts/database/ingest_fred_series.py
 ```
 
@@ -124,6 +130,7 @@ python scripts/database/ingest_fred_series.py
 - `VXVCLS` - VXV (3-month VIX)
 - `FEDFUNDS` - Fed Funds Rate
 - `DGS2`, `DGS5`, `DGS10`, `DGS30` - Treasury rates
+- `SOFR`, `DTB3` - Risk-free alternatives
 - `T10Y2Y` - 10Y-2Y spread
 - `T10YIE`, `T5YIFR` - Inflation expectations
 - `BAMLH0A0HYM2`, `BAMLC0A0CM` - Credit spreads
@@ -131,6 +138,37 @@ python scripts/database/ingest_fred_series.py
 - `CPIAUCSL` - CPI
 - `UNRATE` - Unemployment
 - `DTWEXBGS` - Dollar index
+- `ECBDFR`, `IRSTCI01JPM156N`, `IUDSOIA` - Global rates
+- `SP500`, `NASDAQ100` - Spot index levels (price-return)
+
+### RUT Spot Index (Yahoo/MarketWatch)
+
+```powershell
+# Sanity check providers (RECOMMENDED before downloading)
+python scripts/download/download_index_spot.py --probe
+
+# Download RUT and ingest
+python scripts/download/download_index_spot.py --ingest
+
+# Force full backfill from specific date
+python scripts/download/download_index_spot.py --backfill --start 1990-01-01 --ingest
+
+# Download only (no ingest)
+python scripts/download/download_index_spot.py
+
+# Ingest existing files only (no download)
+python scripts/download/download_index_spot.py --ingest-only
+```
+
+**Features:**
+- Yahoo Finance primary, MarketWatch fallback for RUT spot close
+- Uses `Close` price (NOT `Adj Close`) for price-return level
+- **If both providers fail, the script hard-fails and does not ingest**
+- Hard-fails if data is stale (> 10 days old) or insufficient (< 1000 rows on backfill)
+- Append-only: hard-fails if historical values change
+
+**Note:** RUT_SPOT was manually seeded for 2020-2026 (2026-01-21). Going forward: append-only updates via providers. Manual CSV import (`--import-csv`) only for extending history earlier than current min date (rare, never overwrites).
+- Validates: no duplicates, no negative values, flags >20% daily moves
 
 ### Instrument Definitions
 
@@ -264,7 +302,8 @@ python scripts/database/check_database.py
 python scripts/download/download_and_ingest_options.py --weeks 1 --yes
 python scripts/download/download_and_ingest_futures.py --weeks 1 --yes
 python scripts/download/download_universe_daily_ohlcv.py --weeks 2
-python scripts/download/download_fred_series.py
+python scripts/download/download_fred_series.py --ingest
+python scripts/download/download_index_spot.py --ingest
 ```
 
 ### After Vacation (Catch-up)
@@ -374,6 +413,7 @@ ORDER BY expiration;
 | **Raw Downloads** | `data/raw/` |
 | **Gold Outputs** | `data/gold/` |
 | **FRED Parquets** | `data/external/fred/` |
+| **Index Spot Parquets** | `data/external/index_spot/` |
 | **Logs** | `logs/downloader.log` |
 | **Config - API Keys** | `.env` |
 | **Config - Universe** | `configs/download_universe.yaml` |

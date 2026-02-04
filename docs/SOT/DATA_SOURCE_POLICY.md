@@ -1,6 +1,6 @@
 # Data Source Policy
 
-Single source of truth policy for volatility data in the canonical research database.
+Single source of truth policy for volatility data and spot index levels in the canonical research database.
 
 ## Summary
 
@@ -10,6 +10,9 @@ Single source of truth policy for volatility data in the canonical research data
 | **VX Futures (VX1/2/3)** | CBOE → financial-data-system | `sync_vix_vx_from_financial_data_system.py` | 2004-03-26 to present |
 | **VIX3M Index (3M)** | CBOE → financial-data-system | `sync_vix_vx_from_financial_data_system.py` | 2009-09-18 to present |
 | **VVIX Index** | CBOE → financial-data-system | `sync_vix_vx_from_financial_data_system.py` | 2006-03-06 to present |
+| **SPX Spot (Price Index)** | FRED | `download_fred_series.py` | 1996-01-02 to present |
+| **NDX Spot (Price Index)** | FRED | `download_fred_series.py` | 1996-01-02 to present |
+| **RUT Spot (Price Index)** | Yahoo (primary) / MarketWatch (fallback) | `download_index_spot.py` | 1987+ to present |
 
 ## Architecture
 
@@ -270,6 +273,124 @@ WHERE symbol IN ('@VX=101XN', '@VX=201XN', '@VX=301XN')
 GROUP BY symbol;
 ```
 
+## Spot Index Levels (Price-Return)
+
+These are price-return (NOT total-return) index levels used for implied dividend and equity carry calculations.
+
+### SPX Spot (S&P 500)
+
+**Primary Source:** FRED (`SP500` series)
+
+```powershell
+# Download SPX from FRED
+python scripts/download/download_fred_series.py --series SP500 --ingest
+```
+
+**Storage:**
+- Database: `data/silver/market.duckdb`
+- Table: `f_fred_observations`
+- Series ID: `SP500`
+
+**Rationale:**
+- FRED provides clean, stable historical S&P 500 price index data
+- Uses Close (price-return) level, not adjusted/total-return
+
+### NDX Spot (NASDAQ 100)
+
+**Primary Source:** FRED (`NASDAQ100` series)
+
+```powershell
+# Download NDX from FRED
+python scripts/download/download_fred_series.py --series NASDAQ100 --ingest
+```
+
+**Storage:**
+- Database: `data/silver/market.duckdb`
+- Table: `f_fred_observations`
+- Series ID: `NASDAQ100`
+
+**Rationale:**
+- FRED provides clean NASDAQ 100 price index data
+- Uses Close (price-return) level, not adjusted/total-return
+
+### RUT Spot (Russell 2000)
+
+**Primary Source:** Yahoo Finance (`^RUT` symbol)  
+**Fallback Source:** MarketWatch CSV download (`rut` symbol)
+
+```powershell
+# Sanity check providers before download
+python scripts/download/download_index_spot.py --probe
+
+# Download RUT from Yahoo (with MarketWatch fallback)
+python scripts/download/download_index_spot.py --ingest
+
+# Force full backfill
+python scripts/download/download_index_spot.py --backfill --start 1990-01-01 --ingest
+```
+
+**Storage:**
+- Bronze: `data/external/index_spot/RUT_SPOT.parquet`
+- Silver: `data/silver/market.duckdb`
+- Table: `f_fred_observations` (with `series_id='RUT_SPOT'`)
+
+**Rationale:**
+- RUT is not available via FRED API
+- Yahoo Finance is primary (reliable, well-tested)
+- MarketWatch is fallback (explicit CSV endpoint, verified unadjusted)
+- Uses Close price (NOT Adj Close) for price-return index
+
+**Non-Silent Failure Contract:**
+- If both Yahoo and MarketWatch fail, the script **hard-fails and does not ingest**
+- Hard-fail if data is stale (latest date > 10 calendar days old)
+- Hard-fail if backfill returns insufficient rows (< 1000 rows)
+- Hard-fail if historical values change (append-only enforcement)
+
+**Important Notes:**
+- Always use `Close` column, never `Adj Close` (we need price-return, not total-return)
+- Use `--probe` to verify providers before downloading
+- Validation includes: no duplicates, no negative values, outlier detection (>20% daily move)
+
+**One-Time Manual Backfill (2026-01-21):**
+- RUT_SPOT was manually seeded for 2020-01-02 to 2026-01-20 via CSV import (`--import-csv`)
+- Going forward: **append-only updates via providers** (Yahoo/MarketWatch)
+- Manual CSV import (`--import-csv`) should be used **only if it extends history earlier than current min date** (rare)
+- Manual CSV import **never overwrites** existing data — it only inserts missing dates
+
+### Loading Spot Index Data
+
+```python
+def load_spx_spot(con, start_date, end_date):
+    """Load SPX spot index from FRED."""
+    return con.execute("""
+        SELECT date, value as spx_close
+        FROM f_fred_observations
+        WHERE series_id = 'SP500'
+          AND date BETWEEN ? AND ?
+        ORDER BY date
+    """, [start_date, end_date]).df()
+
+def load_ndx_spot(con, start_date, end_date):
+    """Load NDX spot index from FRED."""
+    return con.execute("""
+        SELECT date, value as ndx_close
+        FROM f_fred_observations
+        WHERE series_id = 'NASDAQ100'
+          AND date BETWEEN ? AND ?
+        ORDER BY date
+    """, [start_date, end_date]).df()
+
+def load_rut_spot(con, start_date, end_date):
+    """Load RUT spot index from Yahoo/MarketWatch."""
+    return con.execute("""
+        SELECT date, value as rut_close
+        FROM f_fred_observations
+        WHERE series_id = 'RUT_SPOT'
+          AND date BETWEEN ? AND ?
+        ORDER BY date
+    """, [start_date, end_date]).df()
+```
+
 ## Benefits
 
 1. **No Duplication:** VIX (1M) comes from FRED only, not duplicated from financial-data-system
@@ -279,14 +400,31 @@ GROUP BY symbol;
    - VIX3M (3M): CBOE via financial-data-system
    - VVIX: CBOE via financial-data-system
    - VX1/2/3: CBOE via financial-data-system
+   - SPX Spot: FRED
+   - NDX Spot: FRED
+   - RUT Spot: Yahoo (primary) / MarketWatch (fallback)
 4. **Complete Term Structure:** VIX (1M) + VIX3M (3M) + VX1/2/3 for full volatility curve analysis
-5. **Consistency:** All data accessible from one canonical database
+5. **Spot Index Coverage:** SPX, NDX, RUT for implied dividend and equity carry calculations
+6. **Consistency:** All data accessible from one canonical database
 
 ## Maintenance
 
 **Regular Updates:**
-1. **VIX (1M) from FRED:** Run `download_fred_series.py` weekly
-2. **VIX3M + VX from CBOE:**
+1. **VIX (1M) + SPX + NDX from FRED:** Run `download_fred_series.py` weekly
+   ```powershell
+   python scripts/download/download_fred_series.py --ingest
+   ```
+
+2. **RUT from Yahoo/MarketWatch:** Run `download_index_spot.py` monthly (or as needed)
+   ```powershell
+   # First, sanity check providers
+   python scripts/download/download_index_spot.py --probe
+   
+   # Then download and ingest
+   python scripts/download/download_index_spot.py --ingest
+   ```
+
+3. **VIX3M + VX from CBOE:**
    ```powershell
    # In financial-data-system repo
    python -m src.scripts.market_data.vix.update_vix3m_index
@@ -302,11 +440,17 @@ GROUP BY symbol;
   - VIX3M: 2009+ (CBOE)
   - VVIX: 2006+ (CBOE)
   - VX1/2/3: 2004+ (CBOE)
+  - SPX: 1996+ (FRED)
+  - NDX: 1996+ (FRED)
+  - RUT: 1987+ (Yahoo)
 - Check for gaps in time series
 - Validate term structure is reasonable:
   - VIX3M > VIX (usually in contango)
   - VX1 ≈ VIX (spot vs front month alignment)
   - VX2 > VX1 (typical contango)
+- Validate spot index sanity:
+  - No negative or zero values
+  - No daily moves > 20% (flag for review)
 
 ## Related Documentation
 

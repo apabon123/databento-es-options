@@ -1,8 +1,7 @@
 # FRED API configuration.
-# Set `api_key` to your personal token from https://fred.stlouisfed.org/docs/api/api_key.html
-#
-# Optionally adjust the default observation window used by the downloader script.
-api_key: "f03b2b663246617c084e1803b0de7434"
+# Prefer setting FRED_API_KEY in .env at project root (not committed).
+# Optional fallback: set api_key here (e.g. for CI); get a key at https://fred.stlouisfed.org/docs/api/api_key.html
+# api_key: "your_fred_api_key_here"
 default_start: 1990-01-01
 default_end: null  # null => use today's date
 

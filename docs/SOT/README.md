@@ -36,6 +36,20 @@ Describes the Bronze-Silver-Gold pattern, table naming conventions, schema detai
 
 ---
 
+### [CONTRACT_SERIES_NAMING.md](CONTRACT_SERIES_NAMING.md)
+
+**Contract series naming conventions and canonical series selection.**
+
+Explains the naming pattern `{ROOT}_{RANK}_{ROLL_STRATEGY}`, roll strategies (CALENDAR, CALENDAR_2D, VOLUME), and how canonical series are selected based on coverage. This is the **authoritative** reference for:
+- Contract series naming patterns
+- Rank values (FRONT vs numeric)
+- Roll strategy differences
+- Canonical series selection criteria (based on coverage, not naming)
+
+**Use this when:** You need to understand how contract series are named or how to identify the canonical series for a root.
+
+---
+
 ### [UPDATE_WORKFLOWS.md](UPDATE_WORKFLOWS.md)
 
 **Standard procedures for updating data.**
@@ -72,6 +86,7 @@ Defines the contract between this repository and downstream systems (e.g., `Futu
 | What tables are guaranteed to exist? | [INTEROP_CONTRACT.md](INTEROP_CONTRACT.md) |
 | How do I update FRED data? | [UPDATE_WORKFLOWS.md](UPDATE_WORKFLOWS.md) |
 | What's the database schema? | [DATA_ARCHITECTURE.md](DATA_ARCHITECTURE.md) |
+| How are contract series named? | [CONTRACT_SERIES_NAMING.md](CONTRACT_SERIES_NAMING.md) |
 | What can I assume exists? | [INTEROP_CONTRACT.md](INTEROP_CONTRACT.md) |
 | What must I compute myself? | [INTEROP_CONTRACT.md](INTEROP_CONTRACT.md) |
 
@@ -83,8 +98,9 @@ If you're building a system that depends on this database:
 
 1. **Start with** [INTEROP_CONTRACT.md](INTEROP_CONTRACT.md) - understand what's guaranteed
 2. **Reference** [DATA_ARCHITECTURE.md](DATA_ARCHITECTURE.md) - understand the schema
-3. **Check** [DATA_SOURCE_POLICY.md](DATA_SOURCE_POLICY.md) - understand data sources
-4. **Follow** [UPDATE_WORKFLOWS.md](UPDATE_WORKFLOWS.md) - if you need to update data
+3. **Check** [CONTRACT_SERIES_NAMING.md](CONTRACT_SERIES_NAMING.md) - understand series naming and canonical selection
+4. **Check** [DATA_SOURCE_POLICY.md](DATA_SOURCE_POLICY.md) - understand data sources
+5. **Follow** [UPDATE_WORKFLOWS.md](UPDATE_WORKFLOWS.md) - if you need to update data
 
 ---
 
@@ -92,7 +108,7 @@ If you're building a system that depends on this database:
 
 - [../TECHNICAL_REFERENCE.md](../TECHNICAL_REFERENCE.md) - Complete schema reference
 - [../DATA_SOURCES_SUMMARY.md](../DATA_SOURCES_SUMMARY.md) - Complete list of all data sources
-- [../../QUICK_REFERENCE.md](../../QUICK_REFERENCE.md) - Command reference
+- [../../docs/QUICK_REFERENCE.md](../../docs/QUICK_REFERENCE.md) - Command reference
 - [../../README.md](../../README.md) - Project overview
 
 ---

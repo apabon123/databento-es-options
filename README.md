@@ -13,20 +13,36 @@ Download, transform, and store CME futures, options, and macro data from DataBen
 
 ## Quick Setup
 
-```powershell
+```bash
 # 1. Create virtual environment
 python -m venv .venv
-./.venv/Scripts/Activate.ps1
+# Windows PowerShell:
+#   .\.venv\Scripts\Activate.ps1
+# macOS / Linux:
+#   source .venv/bin/activate
 
 # 2. Install dependencies
 pip install -r requirements.txt
 
-# 3. Configure API keys
-Copy-Item .env.example .env
-# Edit .env:
-#   DATABENTO_API_KEY=your_key_here
-#   FRED_API_KEY=your_fred_key_here (optional)
+# 3. Configure API keys and paths
+cp .env.example .env
+# Edit .env with your API keys and data paths (see example below)
 ```
+
+### Example .env (macOS)
+
+```bash
+# Required for downloads
+DATABENTO_API_KEY=your_databento_api_key_here
+FRED_API_KEY=your_fred_api_key_here
+
+# Data paths (macOS example)
+DATA_BRONZE_ROOT="/Users/YOUR_USERNAME/Work/Data Downloads/databento/raw"
+DATA_GOLD_ROOT="/Users/YOUR_USERNAME/Work/Data Downloads/databento/gold"
+DUCKDB_PATH="./data/silver/market.duckdb"
+```
+
+The project uses `python-dotenv` to load `.env` automatically. All entrypoints (`orchestrator.py` and scripts under `scripts/`) load it via `src.utils.env.load_env()`.
 
 ## Most Common Commands
 
@@ -113,7 +129,7 @@ con.close()
 
 | Document | Purpose |
 |----------|---------|
-| **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** | Complete command reference, all flags, workflows, troubleshooting |
+| **[QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md)** | Complete command reference, all flags, workflows, troubleshooting |
 | **[docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md)** | Database schema, architecture, roll strategies, sharing data |
 | **[docs/SOT/DATA_SOURCE_POLICY.md](docs/SOT/DATA_SOURCE_POLICY.md)** | Authoritative data source policy for VIX/VX and volatility data |
 | **[docs/SOT/INTEROP_CONTRACT.md](docs/SOT/INTEROP_CONTRACT.md)** | Guaranteed tables and series for downstream systems |

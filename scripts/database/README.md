@@ -1,23 +1,27 @@
 # Database Scripts
 
-Database management and inspection. See [QUICK_REFERENCE.md](../../QUICK_REFERENCE.md#database-commands) for full documentation.
+Database management and inspection. See [QUICK_REFERENCE.md](../../docs/QUICK_REFERENCE.md#database-commands) for full documentation.
 
 ## Scripts
 
 | Script | Purpose |
 |--------|---------|
 | `check_database.py` | Check duplicates, stats, verify coverage |
+| `verify_continuous_daily.py` | Verify `g_continuous_bar_daily` coverage by contract_series + trading_date |
 | `inspect_futures.py` | Inspect ES futures data |
 | `download_instrument_definitions.py` | Download contract specs from DataBento |
 | `ingest_fred_series.py` | Ingest FRED parquets into database |
 | `populate_instrument_metadata.py` | Populate instrument metadata |
 | `sync_vix_vx_from_financial_data_system.py` | Sync VX continuous (VX1/2/3) and VIX3M index from financial-data-system DB |
+| `verify_fred_additions.py` | Verify newly added FRED series in the database |
 
 ## Quick Examples
 
 ```powershell
 python scripts/database/check_database.py
 python scripts/database/check_database.py --verify-coverage --year 2025
+python scripts/database/verify_continuous_daily.py --year 2025
+python scripts/database/verify_continuous_daily.py --start 2024-01-01 --end 2024-12-31 --gap-threshold 5
 python scripts/database/inspect_futures.py --contract ESH6
 python scripts/database/download_instrument_definitions.py --all
 python scripts/database/sync_vix_vx_from_financial_data_system.py

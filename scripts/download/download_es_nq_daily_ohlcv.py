@@ -44,10 +44,13 @@ from src.utils.db_utils import (
     get_existing_daily_dates_for_series,
     get_db_summary,
 )
+from src.utils.env import load_env
+
+load_env()
+
 from pipelines.common import get_paths, connect_duckdb
 from pipelines.loader import load
 import databento as db
-from dotenv import load_dotenv
 import os
 
 # Setup logging
@@ -101,12 +104,6 @@ CHI = pytz.timezone("America/Chicago")
 
 def load_api_key():
     """Load DataBento API key from .env file."""
-    env_path = PROJECT_ROOT / ".env"
-    if env_path.exists():
-        load_dotenv(dotenv_path=env_path)
-    else:
-        load_dotenv()
-    
     api_key = os.getenv("DATABENTO_API_KEY")
     if not api_key:
         raise RuntimeError("No API key found. Set DATABENTO_API_KEY in your environment or .env file at project root.")

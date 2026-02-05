@@ -1,12 +1,16 @@
 """Verify newly added FRED series."""
 import os
+import sys
 import duckdb
 from pathlib import Path
-from dotenv import load_dotenv
 
-PROJECT_ROOT = Path(__file__).parent
-os.chdir(PROJECT_ROOT)
-load_dotenv()
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.utils.env import load_env
+
+load_env()
 
 db_path = os.getenv('DUCKDB_PATH')
 con = duckdb.connect(db_path)
@@ -65,4 +69,3 @@ for _, row in result.iterrows():
 
 print()
 print(f"Total series: {len(result)}")
-

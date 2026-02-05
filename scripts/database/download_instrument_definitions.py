@@ -24,10 +24,13 @@ import time
 
 import pandas as pd
 import databento as db
-from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.utils.env import load_env
+
+load_env()
 
 from pipelines.common import get_paths, connect_duckdb
 
@@ -42,12 +45,6 @@ logging.basicConfig(
 
 def load_api_key() -> str:
     """Load DataBento API key from .env file."""
-    env_path = PROJECT_ROOT / ".env"
-    if env_path.exists():
-        load_dotenv(dotenv_path=env_path)
-    else:
-        load_dotenv()
-    
     api_key = os.getenv("DATABENTO_API_KEY")
     if not api_key:
         raise RuntimeError("DATABENTO_API_KEY not found. Set it in your environment or .env file.")

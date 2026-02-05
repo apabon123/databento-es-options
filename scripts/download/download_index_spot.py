@@ -34,12 +34,15 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 import requests
-from dotenv import load_dotenv
 
 # Ensure project root is importable
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.utils.env import load_env
+
+load_env()
 
 LOGGER = logging.getLogger("download_index_spot")
 
@@ -1228,13 +1231,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parser.parse_args(list(argv) if argv is not None else None)
     
     configure_logging(verbose=args.verbose)
-    
-    # Load environment
-    env_path = PROJECT_ROOT / ".env"
-    if env_path.exists():
-        load_dotenv(dotenv_path=env_path)
-    else:
-        load_dotenv()
     
     # Parse series filter
     series_filter = None

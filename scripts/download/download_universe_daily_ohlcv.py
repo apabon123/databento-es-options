@@ -17,7 +17,6 @@ from typing import Dict, Iterable, List, Optional
 
 import databento as db
 import pandas as pd
-from dotenv import load_dotenv
 from calendar import monthrange
 
 try:
@@ -30,7 +29,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.utils.continuous_transform import transform_continuous_ohlcv_daily_to_folder_structure
+from src.utils.env import load_env
+
+load_env()
+
+from src.utils.continuous_transform import (
+    transform_continuous_ohlcv_daily_to_folder_structure,
+    transform_continuous_ohlcv_daily_month_batch,
+)
 from src.utils.universe_config import DownloadUniverseConfig, RootUniverse, load_download_universe_config
 from pipelines.common import get_paths
 from pipelines.loader import load as load_product
@@ -52,12 +58,6 @@ def configure_logging(verbose: bool = False) -> None:
 
 
 def load_api_key() -> str:
-    env_path = PROJECT_ROOT / ".env"
-    if env_path.exists():
-        load_dotenv(dotenv_path=env_path)
-    else:
-        load_dotenv()
-
     api_key = os.getenv("DATABENTO_API_KEY")
     if not api_key:
         raise RuntimeError("DATABENTO_API_KEY not found. Set it in the environment or .env file.")
@@ -115,6 +115,59 @@ def parquet_has_rows(path: Path) -> bool:
         return not temp.empty
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("  ⚠ Could not inspect parquet '%s': %s", path, exc)
+        return False
+
+
+def expected_dates_from_month_parquet(month_dir: Path) -> Optional[set]:
+    """
+    Read the transformed monthly parquet (source-of-truth) and return the set of
+    distinct trading_date values. Returns None if parquet is missing or unreadable.
+    """
+    bars_dir = month_dir / "continuous_bars_daily"
+    if not bars_dir.exists():
+        return None
+    parquet_paths = list(bars_dir.glob("*.parquet"))
+    if not parquet_paths:
+        return None
+    try:
+        dfs = [pd.read_parquet(p) for p in parquet_paths]
+        combined = pd.concat(dfs, ignore_index=True)
+        if "trading_date" not in combined.columns:
+            return None
+        dates = pd.to_datetime(combined["trading_date"], errors="coerce").dt.date
+        return set(dates.dropna().unique())
+    except Exception as exc:
+        logger.debug("  Could not read month parquet for expected dates: %s", exc)
+        return None
+
+
+def month_dir_complete_in_db(dbpath: Path, month_dir: Path) -> bool:
+    """
+    Return True if g_continuous_bar_daily already has all trading_date values
+    that appear in the transformed monthly parquet (source-of-truth) for this
+    month_dir. No business-day calendar; comparison is parquet vs DB only.
+    """
+    expected = expected_dates_from_month_parquet(month_dir)
+    if expected is None or not expected:
+        return False
+    try:
+        import duckdb
+        con = duckdb.connect(str(dbpath))
+        month_start = min(expected)
+        month_end = max(expected)
+        result = con.execute(
+            """
+            SELECT DISTINCT trading_date::DATE as d
+            FROM g_continuous_bar_daily
+            WHERE trading_date >= ? AND trading_date <= ?
+            """,
+            [month_start, month_end],
+        ).fetchall()
+        con.close()
+        actual = {row[0] for row in result}
+        return expected <= actual
+    except Exception as exc:
+        logger.debug("  Could not check month_dir completeness: %s", exc)
         return False
 
 
@@ -222,6 +275,21 @@ def download_root_daily(
     return downloaded
 
 
+def _group_files_by_month(parquet_files: List[Path]) -> Dict[tuple, List[Path]]:
+    """Group parquet file paths by (year, month)."""
+    by_month: Dict[tuple, List[Path]] = {}
+    for pf in parquet_files:
+        try:
+            parts = pf.stem.split(".")[0].split("-")
+            date_str = "-".join(parts[-3:])
+            d = date.fromisoformat(date_str)
+            key = (d.year, d.month)
+            by_month.setdefault(key, []).append(pf)
+        except Exception:
+            continue
+    return by_month
+
+
 def transform_and_ingest(
     downloaded: Dict[str, List[Path]],
     root_configs: Dict[str, RootUniverse],
@@ -230,81 +298,138 @@ def transform_and_ingest(
     perform_ingest: bool,
     start_d: Optional[date] = None,
     end_d: Optional[date] = None,
+    chunk_mode: str = "day",
+    resume: bool = False,
 ) -> None:
     if not downloaded:
         logger.info("No files downloaded; skipping transform and ingest.")
         return
 
-    bronze_root, _, _ = get_paths()
+    bronze_root, _, dbpath = get_paths()
     transformed_dirs: List[Path] = []
+    month_dirs_by_root: Dict[str, List[Path]] = {}
 
-    for root, parquet_files in downloaded.items():
-        if not parquet_files:
-            continue
-        root_cfg = root_configs[root]
-        logger.info("Transforming %d files for %s", len(parquet_files), root)
-
-        output_parent = bronze_root / "ohlcv-1d" / "transformed" / root_cfg.folder / root_cfg.root.upper()
-        for parquet_file in parquet_files:
-            try:
-                parts = parquet_file.stem.split(".")[0].split("-")
-                date_str = "-".join(parts[-3:])
-            except Exception as exc:
-                logger.error("  ✗ Could not parse date from %s: %s", parquet_file.name, exc)
+    if chunk_mode == "month":
+        for root, parquet_files in downloaded.items():
+            if not parquet_files:
                 continue
+            root_cfg = root_configs[root]
+            output_parent = bronze_root / "ohlcv-1d" / "transformed" / root_cfg.folder / root_cfg.root.upper()
+            by_month = _group_files_by_month(parquet_files)
+            month_dirs: List[Path] = []
+            for (year, month), files in sorted(by_month.items()):
+                month_label = f"{year}-{month:02d}"
+                month_dir = output_parent / month_label
+                logger.info("Transforming %s: %d files for %s", month_label, len(files), root)
+                try:
+                    transform_continuous_ohlcv_daily_month_batch(
+                        parquet_files=files,
+                        output_month_dir=month_dir,
+                        product=product_code,
+                        roll_rule=root_cfg.roll_rule_desc,
+                        roll_strategy=root_cfg.roll_strategy,
+                        re_transform=re_transform,
+                    )
+                    month_dirs.append(month_dir)
+                except Exception as exc:
+                    logger.error("  ✗ Failed to transform %s for %s: %s", month_label, root, exc)
+            month_dirs_by_root[root] = month_dirs
+            transformed_dirs.extend(month_dirs)
+    else:
+        for root, parquet_files in downloaded.items():
+            if not parquet_files:
+                continue
+            root_cfg = root_configs[root]
+            logger.info("Transforming %d files for %s", len(parquet_files), root)
 
-            try:
-                results = transform_continuous_ohlcv_daily_to_folder_structure(
-                    parquet_file=parquet_file,
-                    output_base=output_parent,
-                    product=product_code,
-                    roll_rule=root_cfg.roll_rule_desc,
-                    roll_strategy=root_cfg.roll_strategy,
-                    output_mode="partitioned",
-                    re_transform=re_transform,
+            output_parent = bronze_root / "ohlcv-1d" / "transformed" / root_cfg.folder / root_cfg.root.upper()
+            for parquet_file in parquet_files:
+                try:
+                    parts = parquet_file.stem.split(".")[0].split("-")
+                    date_str = "-".join(parts[-3:])
+                except Exception as exc:
+                    logger.error("  ✗ Could not parse date from %s: %s", parquet_file.name, exc)
+                    continue
+
+                try:
+                    results = transform_continuous_ohlcv_daily_to_folder_structure(
+                        parquet_file=parquet_file,
+                        output_base=output_parent,
+                        product=product_code,
+                        roll_rule=root_cfg.roll_rule_desc,
+                        roll_strategy=root_cfg.roll_strategy,
+                        output_mode="partitioned",
+                        re_transform=re_transform,
+                    )
+                    transformed_dirs.extend(results)
+                except Exception as exc:
+                    logger.error("  ✗ Failed to transform %s: %s", parquet_file.name, exc)
+                    continue
+
+            if start_d is not None and end_d is not None:
+                report_missing_dates(
+                    root_cfg=root_cfg,
+                    start_d=start_d,
+                    end_d=end_d,
+                    transformed_base=output_parent,
                 )
-                transformed_dirs.extend(results)
-            except Exception as exc:
-                logger.error("  ✗ Failed to transform %s: %s", parquet_file.name, exc)
-                continue
-
-        if start_d is not None and end_d is not None:
-            report_missing_dates(
-                root_cfg=root_cfg,
-                start_d=start_d,
-                end_d=end_d,
-                transformed_base=output_parent,
-            )
 
     if not perform_ingest:
         logger.info("Skipping ingest (requested).")
         return
 
-    unique_dirs = sorted(set(transformed_dirs))
+    if chunk_mode == "month":
+        if not month_dirs_by_root:
+            logger.info("No transformed month directories to ingest.")
+            return
+        logger.info("Running migrations prior to ingest…")
+        from orchestrator import migrate
+        migrate()
 
-    if not unique_dirs:
-        logger.info("No transformed directories to ingest.")
-        return
+        all_month_dirs = sorted(
+            md for dirs in month_dirs_by_root.values() for md in dirs
+        )
+        for month_dir in all_month_dirs:
+            month_label = month_dir.name
+            if not (month_dir / "continuous_bars_daily").exists():
+                logger.debug("  ⚠ Skipping %s (no continuous_bars_daily folder)", month_dir)
+                continue
+            if resume and month_dir_complete_in_db(dbpath, month_dir):
+                logger.info(
+                    "  ↺ Skipping %s/%s (parquet dates already in g_continuous_bar_daily)",
+                    month_dir.parent.name,
+                    month_label,
+                )
+                continue
+            try:
+                load_product(product_code, month_dir, month_label)
+                logger.info("  ✓ Ingested %s/%s", month_dir.parent.name, month_label)
+            except Exception as exc:
+                logger.error("  ✗ Failed to ingest %s: %s", month_dir, exc)
+    else:
+        unique_dirs = sorted(set(transformed_dirs))
+        if not unique_dirs:
+            logger.info("No transformed directories to ingest.")
+            return
 
-    logger.info("Running migrations prior to ingest…")
-    from orchestrator import migrate
+        logger.info("Running migrations prior to ingest…")
+        from orchestrator import migrate
+        migrate()
 
-    migrate()
-
-    logger.info("Ingesting %d transformed directories", len(unique_dirs))
-    for source_dir in unique_dirs:
-        if not (source_dir / "continuous_bars_daily").exists():
-            logger.debug("  ⚠ Skipping %s (no continuous_bars_daily folder)", source_dir)
-            continue
-        try:
-            date_str = source_dir.name
-        except Exception:
-            date_str = None
-        try:
-            load_product(product_code, source_dir, date_str)
-            logger.info("  ✓ Ingested %s", source_dir)
-        except Exception as exc:
-            logger.error("  ✗ Failed to ingest %s: %s", source_dir, exc)
+        logger.info("Ingesting %d transformed directories", len(unique_dirs))
+        for source_dir in unique_dirs:
+            if not (source_dir / "continuous_bars_daily").exists():
+                logger.debug("  ⚠ Skipping %s (no continuous_bars_daily folder)", source_dir)
+                continue
+            try:
+                date_str = source_dir.name
+            except Exception:
+                date_str = None
+            try:
+                load_product(product_code, source_dir, date_str)
+                logger.info("  ✓ Ingested %s", source_dir)
+            except Exception as exc:
+                logger.error("  ✗ Failed to ingest %s: %s", source_dir, exc)
 
 
 def parse_roots_arg(value: Optional[str]) -> Optional[List[str]]:
@@ -331,6 +456,17 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     parser.add_argument("--force-download", action="store_true", help="Overwrite existing downloaded parquet files.")
     parser.add_argument("--re-transform", action="store_true", help="Re-run transformations even if outputs exist.")
     parser.add_argument("--no-ingest", action="store_true", help="Skip ingest step after transformation.")
+    parser.add_argument(
+        "--chunk",
+        choices=["day", "month"],
+        default="day",
+        help="Chunking mode: 'day' (default) per-date transform/ingest; 'month' month-partitioned pipeline with bulk ingest.",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="When --chunk month: skip months already present in g_continuous_bar_daily.",
+    )
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging.")
 
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -386,6 +522,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         perform_ingest=not args.no_ingest,
         start_d=start_d,
         end_d=end_d,
+        chunk_mode=args.chunk,
+        resume=args.resume,
     )
 
     logger.info("Download universe run complete.")

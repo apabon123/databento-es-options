@@ -15,12 +15,15 @@ from pathlib import Path
 from typing import List, Optional
 
 import pandas as pd
-from dotenv import load_dotenv
 
 # Ensure project root is importable
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.utils.env import load_env
+
+load_env()
 
 from pipelines.common import get_paths, connect_duckdb
 from orchestrator import migrate
@@ -186,12 +189,6 @@ def main() -> int:
     configure_logging(verbose=args.verbose)
     
     # Load environment
-    env_path = PROJECT_ROOT / ".env"
-    if env_path.exists():
-        load_dotenv(dotenv_path=env_path)
-    else:
-        load_dotenv()
-    
     # Get paths
     if args.external_root:
         external_root = Path(args.external_root).resolve()

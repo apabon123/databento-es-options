@@ -101,6 +101,19 @@ The following series are **authoritative** and guaranteed to be available. Each 
 
 All products defined in `configs/download_universe.yaml` are available with contract series naming: `{ROOT}_{RANK}_{ROLL_STRATEGY}` or `{ROOT}_FRONT_{ROLL_STRATEGY}`.
 
+**Naming Convention:** See [CONTRACT_SERIES_NAMING.md](./CONTRACT_SERIES_NAMING.md) for detailed explanation of the naming pattern, roll strategies, and rank values.
+
+**Canonical series (Futures-Six):** The view `v_canonical_continuous_bar_daily` selects the canonical front-month series per root, as defined in `configs/canonical_series.yaml`. Use it for downstream integration:
+
+**Note:** The canonical series per root is the series with best historical coverage. Run `scripts/analysis/audit_contract_series.py` to verify coverage and identify the optimal canonical series.
+
+```sql
+SELECT trading_date, root, contract_series, open, high, low, close, volume
+FROM v_canonical_continuous_bar_daily
+WHERE trading_date BETWEEN '2024-01-01' AND '2024-12-31'
+ORDER BY root, trading_date;
+```
+
 **Examples:**
 - `ES_FRONT_CALENDAR_2D` - ES front month, 2-day pre-expiry calendar roll
 - `NQ_FRONT_CALENDAR_2D` - NQ front month

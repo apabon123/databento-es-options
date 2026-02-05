@@ -77,3 +77,4 @@ data/external/**/*.parquet
 data/external/index_spot/
 data/external/**/manifest.json
 src/logs/*.log
+artifacts/

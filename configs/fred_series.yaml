@@ -50,4 +50,25 @@ series:
     name: "5-Year, 5-Year Forward Inflation Expectation Rate"
   BAMLC0A0CM:
     name: "ICE BofA US Corporate Index Option-Adjusted Spread"
+  # Phase 6: Global Central Bank Rates
+  ECBDFR:
+    name: "ECB Deposit Facility Rate"
+  IRSTCI01JPM156N:
+    name: "Japan Overnight Call Rate"
+  IUDSOIA:
+    name: "Daily Sterling Overnight Index Average (SONIA) Rate"
+  # Phase 7: USD Risk-Free Alternatives
+  SOFR:
+    name: "Secured Overnight Financing Rate (SOFR)"
+  DTB3:
+    name: "3-Month Treasury Bill Secondary Market Rate"
+  # Phase 8: Spot Index Price Levels (for implied dividend calculations)
+  SP500:
+    name: "S&P 500 Index (Price Return)"
+  NASDAQ100:
+    name: "NASDAQ 100 Index (Price Return)"
+  # NOTE: SP500DY is not available on FRED. S&P 500 dividend yield would need
+  # to be sourced from a different provider (e.g., Quandl, Bloomberg, or CBOE).
+  # NOTE: RUT (Russell 2000) is not available via FRED - see download_index_spot.py
+  # for Yahoo/MarketWatch-based ingestion (see download_index_spot.py).
 

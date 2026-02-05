@@ -219,9 +219,62 @@ MARKET_DATA_DB_PATH=C:\Users\alexp\OneDrive\Gdrive\Trading\GitHub Projects\datab
 
 ---
 
+## Futures vs Equity Calendar
+
+### Trading Days Per Year
+
+**Futures markets trade approximately 314 days per year**, including:
+- Most weekdays (Monday-Friday)
+- Some Sundays (for certain products)
+- Some holidays (when markets are open)
+
+This is **different from equity markets**, which typically trade:
+- ~252 trading days per year (weekdays minus holidays)
+- No Sunday trading
+- Standard market holidays
+
+### Implications for Coverage Analysis
+
+**Critical:** When analyzing data coverage or using the data calendar (`dim_session`):
+
+- **`dim_session`** is the data calendar: distinct `trading_date` observed in the data. It is derived from actual data only and is **not** an exchange calendar. The name is legacy and does NOT represent exchange sessions.
+1. **Do NOT use equity-style weekday calendars** (e.g., assuming 252 trading days/year)
+2. **Derive `dim_session` from actual data** - query `g_continuous_bar_daily` to identify actual trading dates
+3. **Account for Sunday trading** - some futures products trade on Sundays
+4. **Account for holiday trading** - futures markets may be open on some equity market holidays
+
+### Example: Computing Trading Days
+
+```sql
+-- CORRECT: Derive trading days from actual data
+SELECT 
+    COUNT(DISTINCT trading_date) as trading_days,
+    MIN(trading_date) as first_date,
+    MAX(trading_date) as last_date
+FROM g_continuous_bar_daily
+WHERE contract_series = 'ES_FRONT_CALENDAR_2D'
+  AND trading_date >= '2024-01-01'
+  AND trading_date < '2025-01-01';
+
+-- INCORRECT: Assuming equity calendar
+-- Do NOT assume 252 trading days/year for futures
+```
+
+### Coverage Checks
+
+When validating data coverage or identifying gaps:
+
+- **Use actual trading dates** from the database, not calendar assumptions
+- **Account for product-specific schedules** (e.g., SR3 may have different trading hours than ES)
+- **Consider roll dates** - coverage gaps may occur during contract transitions
+- **Verify with source data** - cross-reference with DataBento or exchange calendars when needed
+
+---
+
 ## Related Documentation
 
 - [DATA_SOURCE_POLICY.md](./DATA_SOURCE_POLICY.md) - Authoritative data sources
 - [INTEROP_CONTRACT.md](INTEROP_CONTRACT.md) - Guaranteed tables and series
 - [UPDATE_WORKFLOWS.md](UPDATE_WORKFLOWS.md) - Update procedures
 - [TECHNICAL_REFERENCE.md](../TECHNICAL_REFERENCE.md) - Complete schema reference
+- [CONTRACT_SERIES_NAMING.md](./CONTRACT_SERIES_NAMING.md) - Contract series naming conventions

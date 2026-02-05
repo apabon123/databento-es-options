@@ -20,7 +20,7 @@ python scripts/download/download_and_ingest_futures.py --weeks 1
 
 ---
 
-### 2. FRED Macro Series
+### 2. FRED Macro Series (including SPX, NDX spot)
 
 ```powershell
 # Download all configured series
@@ -31,16 +31,62 @@ python scripts/download/download_fred_series.py --ingest
 
 # Download specific series only
 python scripts/download/download_fred_series.py --series VIXCLS,FEDFUNDS --ingest
+
+# Download spot indices from FRED
+python scripts/download/download_fred_series.py --series SP500,NASDAQ100 --ingest
 ```
 
 **Frequency:** Weekly (FRED updates daily, but weekly sync is sufficient)
 
 **Series Included:**
 - Volatility: VIXCLS, VXVCLS
-- Rates: FEDFUNDS, DGS2, DGS5, DGS10, DGS30
+- Rates: FEDFUNDS, DGS2, DGS5, DGS10, DGS30, SOFR, DTB3
 - Spreads: BAMLH0A0HYM2, BAMLC0A0CM, TEDRATE
 - Economic: CPIAUCSL, UNRATE, DTWEXBGS
 - Yield Curve: T10Y2Y, T10YIE, T5YIFR
+- Global Rates: ECBDFR, IRSTCI01JPM156N, IUDSOIA
+- **Spot Indices (Price-Return):** SP500, NASDAQ100
+
+---
+
+### 2b. RUT Spot Index (Yahoo/MarketWatch)
+
+```powershell
+# RECOMMENDED: Sanity check providers before downloading
+python scripts/download/download_index_spot.py --probe
+
+# Download RUT and ingest
+python scripts/download/download_index_spot.py --ingest
+
+# Force full backfill from specific date
+python scripts/download/download_index_spot.py --backfill --start 1990-01-01 --ingest
+
+# Ingest only (no download)
+python scripts/download/download_index_spot.py --ingest-only
+```
+
+**Frequency:** Monthly (or as needed) — cached to `data/external/index_spot/`
+
+**Series Included:**
+- RUT_SPOT (Russell 2000 price-return index)
+
+**Non-Silent Failure Contract:**
+- If both Yahoo and MarketWatch fail, **the script hard-fails and does not ingest**
+- Hard-fail if data is stale (latest date > 10 calendar days old)
+- Hard-fail if backfill returns insufficient rows (< 1000 rows)
+- Hard-fail if historical values change (append-only enforcement)
+
+**Important:**
+- Uses `Close` price (NOT `Adj Close`) for price-return level
+- Yahoo is primary source, MarketWatch is fallback
+- Use `--probe` to verify providers are working before download
+- Validates: no duplicates, no negative values, flags >20% daily moves
+
+**One-Time Manual Backfill (2026-01-21):**
+- RUT_SPOT was manually seeded for 2020-01-02 to 2026-01-20 via CSV import (`--import-csv`)
+- Going forward: **append-only updates via providers** (Yahoo/MarketWatch)
+- Manual CSV import (`--import-csv`) should be used **only if it extends history earlier than current min date** (rare)
+- Manual CSV import **never overwrites** existing data — it only inserts missing dates
 
 ---
 
@@ -145,6 +191,13 @@ SELECT series_id, COUNT(*) as rows, MIN(date) as first_date, MAX(date) as last_d
 FROM f_fred_observations
 WHERE series_id = 'VIXCLS';
 
+-- Check spot indices (SPX, NDX from FRED, RUT from Yahoo)
+SELECT series_id, COUNT(*) as rows, MIN(date) as first_date, MAX(date) as last_date
+FROM f_fred_observations
+WHERE series_id IN ('SP500', 'NASDAQ100', 'RUT_SPOT')
+GROUP BY series_id
+ORDER BY series_id;
+
 -- Check VIX3M from CBOE
 SELECT symbol, COUNT(*) as rows, 
        MIN(CAST(timestamp AS DATE)) as first_date, 
@@ -178,6 +231,8 @@ ORDER BY contract_series;
 | **ES Options** | Weekly | `download_and_ingest_options.py` |
 | **ES Futures** | Weekly | `download_and_ingest_futures.py` |
 | **FRED Series** | Weekly | `download_fred_series.py` |
+| **SPX/NDX Spot** | Weekly (with FRED) | `download_fred_series.py` |
+| **RUT Spot** | Daily (EOD) | `download_index_spot.py` |
 | **VX/VIX3M/VVIX** | Weekly (after source update) | `sync_vix_vx_from_financial_data_system.py` |
 | **Continuous Daily OHLCV** | As needed (backfills) | `download_universe_daily_ohlcv.py` |
 | **Instrument Definitions** | As needed (new contracts) | `download_instrument_definitions.py` |

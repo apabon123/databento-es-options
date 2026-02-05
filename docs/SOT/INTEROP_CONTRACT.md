@@ -113,10 +113,51 @@ All products defined in `configs/download_universe.yaml` are available with cont
 All series in `configs/fred_series.yaml` are available via `f_fred_observations`:
 
 - **Volatility:** VIXCLS, VXVCLS
-- **Rates:** FEDFUNDS, DGS2, DGS5, DGS10, DGS30
+- **Rates:** FEDFUNDS, DGS2, DGS5, DGS10, DGS30, SOFR, DTB3
 - **Spreads:** BAMLH0A0HYM2, BAMLC0A0CM, TEDRATE
 - **Economic:** CPIAUCSL, UNRATE, DTWEXBGS
 - **Yield Curve:** T10Y2Y, T10YIE, T5YIFR
+- **Global Rates:** ECBDFR, IRSTCI01JPM156N, IUDSOIA
+- **Spot Indices (Price-Return):** SP500, NASDAQ100
+
+### Spot Index Series (Price-Return)
+
+Spot index price-return levels for implied dividend and equity carry calculations:
+
+| Series | Source | Table | Series ID | Coverage |
+|--------|--------|-------|-----------|----------|
+| **SPX Spot** | FRED | `f_fred_observations` | `SP500` | 1996+ to present |
+| **NDX Spot** | FRED | `f_fred_observations` | `NASDAQ100` | 1996+ to present |
+| **RUT Spot** | Yahoo/MarketWatch | `f_fred_observations` | `RUT_SPOT` | 1987+ to present |
+
+**Query Example:**
+```sql
+-- SPX spot index
+SELECT date, value as spx_close
+FROM f_fred_observations
+WHERE series_id = 'SP500'
+  AND date BETWEEN '2020-01-01' AND '2025-12-31'
+ORDER BY date;
+
+-- NDX spot index
+SELECT date, value as ndx_close
+FROM f_fred_observations
+WHERE series_id = 'NASDAQ100'
+  AND date BETWEEN '2020-01-01' AND '2025-12-31'
+ORDER BY date;
+
+-- RUT spot index
+SELECT date, value as rut_close
+FROM f_fred_observations
+WHERE series_id = 'RUT_SPOT'
+  AND date BETWEEN '2020-01-01' AND '2025-12-31'
+ORDER BY date;
+```
+
+**Important Notes:**
+- All spot indices are **price-return** (NOT total-return/adjusted)
+- Use these for implied dividend calculations: `Implied Div Yield = (Futures - Spot) / Spot / T + Risk-Free Rate`
+- RUT uses `Close` price from Yahoo (NOT `Adj Close`)
 
 ---
 
@@ -152,6 +193,8 @@ Downstream systems are **responsible for**:
 - **Volatility-of-volatility** metrics beyond VVIX
 - **Option Greeks** (if not already computed)
 - **Portfolio-level metrics** and aggregations
+- **Implied dividends** from futures-spot basis (using SPX, NDX, RUT spot + futures)
+- **Equity carry** calculations (implied div yield vs risk-free rate)
 
 ### Business Logic
 

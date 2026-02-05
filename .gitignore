@@ -71,3 +71,9 @@ htmlcov/
 *.tmp
 *.bak
 *.swp
+
+# ---- local data (do not commit) ----
+data/external/**/*.parquet
+data/external/index_spot/
+data/external/**/manifest.json
+src/logs/*.log

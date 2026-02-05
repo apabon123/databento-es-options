@@ -1,8 +1,13 @@
 import typer
 from pathlib import Path
+
+from src.utils.env import load_env
+
+load_env()
+
 from pipelines.common import get_paths, connect_duckdb
 from pipelines.loader import load as load_product, apply_gold_sql
-from pipelines.validators import validate_options, validate_futures
+from pipelines.validators import validate_options, validate_futures, validate_continuous_daily
 
 
 app = typer.Typer(help="Market DB Orchestrator (DuckDB + Parquet)")
@@ -52,6 +57,8 @@ def validate(product: str = typer.Option(..., "--product")):
         results = validate_options(con)
     elif product == "ES_FUTURES_MDP3":
         results = validate_futures(con)
+    elif product == "ES_CONTINUOUS_DAILY_MDP3":
+        results = validate_continuous_daily(con)
     else:
         results = []
     for name, cnt in results:

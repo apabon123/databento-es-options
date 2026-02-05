@@ -1,4 +1,3 @@
-from dotenv import load_dotenv
 import os
 from pathlib import Path
 from datetime import datetime, timedelta, date
@@ -12,22 +11,15 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.utils.env import load_env
+
+load_env()
+
 from src.validation.integrity_checks import load_dbn_to_df, basic_checks, summarize
 from src.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-# --- Load your API key from .env ---
-# Explicitly look for .env at the project root
-env_path = PROJECT_ROOT / ".env"
-if not env_path.exists():
-    # Fall back to default dotenv search behavior (current working dir chain)
-    logger.debug(".env not found at project root; relying on default load_dotenv search path")
-    load_dotenv()
-else:
-    logger.debug(f"Loading .env from: {env_path}")
-    load_dotenv(dotenv_path=env_path)
-    
 api_key = os.getenv("DATABENTO_API_KEY")
 
 if not api_key:

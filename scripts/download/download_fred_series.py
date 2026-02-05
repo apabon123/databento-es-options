@@ -17,12 +17,15 @@ from typing import Dict, Iterable, List, Optional
 
 import pandas as pd
 import yaml
-from dotenv import load_dotenv
 
 # Ensure project root is importable
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.utils.env import load_env
+
+load_env()
 
 from src.utils.fred import (
     fetch_series_metadata,
@@ -58,12 +61,6 @@ def load_yaml(path: Path) -> Dict:
 
 
 def load_api_key(settings: Dict) -> str:
-    env_path = PROJECT_ROOT / ".env"
-    if env_path.exists():
-        load_dotenv(dotenv_path=env_path)
-    else:
-        load_dotenv()
-
     api_key = os.getenv("FRED_API_KEY") or settings.get("api_key", "")
     api_key = api_key.strip()
     if not api_key:

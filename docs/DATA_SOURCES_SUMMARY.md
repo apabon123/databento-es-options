@@ -307,5 +307,5 @@ python scripts/download/download_universe_daily_ohlcv.py --roots ES,NQ,ZN --star
 - [SOT/UPDATE_WORKFLOWS.md](SOT/UPDATE_WORKFLOWS.md) - Update procedures and maintenance
 - [SOT/INTEROP_CONTRACT.md](SOT/INTEROP_CONTRACT.md) - Guaranteed tables and series for downstream systems
 - [TECHNICAL_REFERENCE.md](TECHNICAL_REFERENCE.md) - Complete schema reference
-- [QUICK_REFERENCE.md](../QUICK_REFERENCE.md) - Command reference and workflows
+- [QUICK_REFERENCE.md](QUICK_REFERENCE.md) - Command reference and workflows
 - [scripts/database/README.md](../scripts/database/README.md) - Database scripts documentation

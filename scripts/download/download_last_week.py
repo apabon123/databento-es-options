@@ -10,10 +10,13 @@ import sys
 import os
 
 # Add project root to path
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from dotenv import load_dotenv
+from src.utils.env import load_env
+
+load_env()
+
 from src.utils.logging_config import get_logger
 import databento as db
 
@@ -35,9 +38,6 @@ def last_week_range(today: date) -> tuple[date, date]:
 
 
 def main() -> int:
-    # Load .env from project root
-    env_path = PROJECT_ROOT / ".env"
-    load_dotenv(dotenv_path=env_path)
     api_key = os.getenv("DATABENTO_API_KEY")
     if not api_key:
         logger.error("Set DATABENTO_API_KEY in your .env at project root.")

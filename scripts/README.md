@@ -1,6 +1,6 @@
 # Scripts
 
-User-facing scripts organized by function. See [QUICK_REFERENCE.md](../QUICK_REFERENCE.md) for complete command documentation.
+User-facing scripts organized by function. See [QUICK_REFERENCE.md](../docs/QUICK_REFERENCE.md) for complete command documentation.
 
 ## Directories
 

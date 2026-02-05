@@ -32,10 +32,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.utils.continuous_transform import transform_continuous_ohlcv_daily_to_folder_structure, get_continuous_symbol
+from src.utils.env import load_env
+
+load_env()
+
 from pipelines.common import get_paths, connect_duckdb
 from pipelines.loader import load
 import databento as db
-from dotenv import load_dotenv
 import os
 
 # Setup logging
@@ -75,9 +78,6 @@ ROLL_STRATEGIES = {
 
 def load_api_key():
     """Load DataBento API key from .env file."""
-    env_path = PROJECT_ROOT / ".env"
-    if env_path.exists():
-        load_dotenv(env_path)
     api_key = os.getenv("DATABENTO_API_KEY")
     if not api_key:
         raise ValueError("DATABENTO_API_KEY not found in environment or .env file")

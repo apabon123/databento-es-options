@@ -370,3 +370,147 @@ def transform_continuous_ohlcv_daily_to_folder_structure(
     
     logger.info("Transformation complete")
     return outputs
+
+
+def transform_continuous_ohlcv_daily_month_batch(
+    parquet_files: list,
+    output_month_dir: Path,
+    product: str = "ES_CONTINUOUS_DAILY_MDP3",
+    roll_rule: str = "2_days_pre_expiry",
+    roll_strategy: str = "calendar-2d",
+    re_transform: bool = False,
+) -> Path:
+    """
+    Transform multiple daily OHLCV parquet files (one month's worth) into a single
+    month-partitioned output for efficient bulk ingest.
+
+    Output structure: output_month_dir/continuous_instruments/*.parquet,
+                     output_month_dir/continuous_bars_daily/*.parquet
+
+    Args:
+        parquet_files: List of paths to daily parquet files for the month
+        output_month_dir: Base directory for month output (e.g. .../2024-01)
+        product: Product identifier
+        roll_rule: Roll rule description
+        roll_strategy: Roll strategy slug
+        re_transform: If True, overwrite existing output
+
+    Returns:
+        Path to the created month directory
+    """
+    if not parquet_files:
+        return output_month_dir
+
+    if output_month_dir.exists() and not re_transform:
+        logger.info("  ↺ Skipping month %s (exists and re_transform=False)", output_month_dir.name)
+        return output_month_dir
+
+    dfs: list = []
+    for pf in parquet_files:
+        try:
+            parts = pf.stem.split(".")[0].split("-")
+            date_str = "-".join(parts[-3:])
+            day_date = date.fromisoformat(date_str)
+        except Exception:
+            logger.warning("  ⚠ Could not parse date from filename %s", pf.name)
+            continue
+        try:
+            df = pd.read_parquet(pf)
+            if not df.empty:
+                df["trading_date"] = day_date
+                dfs.append(df)
+        except Exception as e:
+            logger.warning("  ⚠ Could not read %s: %s", pf.name, e)
+
+    if not dfs:
+        logger.warning("  ⚠ No data from %d files for month %s", len(parquet_files), output_month_dir.name)
+        return output_month_dir
+
+    df = pd.concat(dfs, ignore_index=True)
+
+    code = _roll_strategy_to_code(roll_strategy)
+    continuous_mask = df["symbol"].str.contains(rf"\.{code}\.\d+", regex=True, na=False)
+    df_continuous = df[continuous_mask].copy()
+
+    if df_continuous.empty:
+        logger.warning("  No continuous contract symbols in month %s", output_month_dir.name)
+        return output_month_dir
+
+    parsed_series = df_continuous["symbol"].apply(parse_continuous_symbol)
+    df_continuous["_root"] = parsed_series.apply(lambda p: p["root"])
+    df_continuous["_rank"] = parsed_series.apply(lambda p: p.get("rank", 0))
+    df_continuous["contract_series"] = df_continuous.apply(
+        lambda row: make_contract_series(row["_root"], roll_strategy, row["_rank"]),
+        axis=1,
+    )
+
+    inst_dir = output_month_dir / "continuous_instruments"
+    bars_daily_dir = output_month_dir / "continuous_bars_daily"
+    inst_dir.mkdir(parents=True, exist_ok=True)
+    bars_daily_dir.mkdir(parents=True, exist_ok=True)
+
+    inst_rows = []
+    for series, group in df_continuous.groupby("contract_series"):
+        root_val = group["_root"].iloc[0]
+        rank_val = int(group["_rank"].iloc[0])
+        description_rank = "front month" if rank_val == 0 else f"rank {rank_val}"
+        inst_rows.append({
+            "contract_series": series,
+            "root": root_val,
+            "roll_rule": roll_rule,
+            "adjustment_method": "unadjusted",
+            "description": f"{root_val} continuous {description_rank} (roll strategy: {roll_strategy}, rule: {roll_rule})",
+        })
+
+    inst_df = pd.DataFrame(inst_rows).drop_duplicates(subset=["contract_series"])
+    inst_path = inst_dir / f"{output_month_dir.name}.parquet"
+    inst_df.to_parquet(inst_path, index=False)
+
+    bar_df = pd.DataFrame({
+        "trading_date": df_continuous["trading_date"],
+        "contract_series": df_continuous["contract_series"],
+        "underlying_instrument_id": df_continuous["instrument_id"],
+        "open": df_continuous["open"],
+        "high": df_continuous["high"],
+        "low": df_continuous["low"],
+        "close": df_continuous["close"],
+        "volume": df_continuous["volume"].astype("int64"),
+    })
+    bar_df = bar_df.groupby(["trading_date", "contract_series"], as_index=False).agg({
+        "underlying_instrument_id": "first",
+        "open": "first",
+        "high": "max",
+        "low": "min",
+        "close": "last",
+        "volume": "sum",
+    })
+    bar_df = bar_df.dropna(subset=["trading_date"])
+
+    # Dedupe to avoid drift on reruns (same key may appear from overlapping files).
+    # Sort for deterministic "last" (most recent / canonical row wins).
+    bar_df = bar_df.sort_values(["trading_date", "contract_series"]).drop_duplicates(
+        subset=["trading_date", "contract_series"], keep="last"
+    )
+
+    # Schema assert: required columns must exist; extras allowed for future fields (e.g. open_interest, vwap).
+    required_cols = {
+        "trading_date",
+        "contract_series",
+        "underlying_instrument_id",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+    }
+    missing = required_cols - set(bar_df.columns)
+    if missing:
+        raise ValueError(
+            f"Month batch schema mismatch for {output_month_dir.name}: missing required columns {missing!r}"
+        )
+
+    bar_path = bars_daily_dir / f"{output_month_dir.name}.parquet"
+    bar_df.to_parquet(bar_path, index=False)
+
+    logger.info("  ✓ Month %s: %d bars, %d contract_series", output_month_dir.name, len(bar_df), len(inst_df))
+    return output_month_dir

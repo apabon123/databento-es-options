@@ -173,6 +173,28 @@ python scripts/database/download_instrument_definitions.py --root SR3 --force
 
 ## Validation & Quality Checks
 
+### Mandatory Post‑Ingest Diagnostics (REQUIRED)
+
+After **any ingest/build** workflow, run the unified diagnostics and generate the health report.
+
+This is the repo’s governed “post‑ingest health gate” and is designed to:
+- use **actual DB data** (DuckDB)
+- rely on **canonical views** for downstream health
+- avoid **trading schedule assumptions** (no Mon–Fri expectations)
+
+```powershell
+# 1) Ensure the data-derived trading calendar is up to date (required for coverage computations)
+python scripts/database/sync_session_from_data.py
+
+# 2) Run unified post-ingest diagnostics (hard-fails with exit code 2 on any hard failure)
+python scripts/diagnostics/run_post_ingest_diagnostics.py --json-out artifacts/post_ingest_diagnostics.json
+
+# 3) Generate a static visual health report from canonical views
+python scripts/diagnostics/generate_health_report.py --out artifacts/health_report.html
+```
+
+See: `docs/SOT/DIAGNOSTICS.md` for the canonical checklist and hard-fail criteria.
+
 ### Check Database Statistics
 
 ```powershell

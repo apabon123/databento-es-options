@@ -30,11 +30,15 @@ from typing import List
 import argparse
 
 # Add project root to path
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import os
-from dotenv import load_dotenv
+
+from src.utils.env import load_env
+
+load_env()
+
 import databento as db
 
 from src.utils.logging_config import get_logger
@@ -389,8 +393,6 @@ def main():
     
     args = parser.parse_args()
     
-    env_path = PROJECT_ROOT / ".env"
-    load_dotenv(dotenv_path=env_path)
     api_key = os.getenv("DATABENTO_API_KEY")
     
     if args.summary:
@@ -415,8 +417,7 @@ def main():
         logger.info(f"No date range specified, using last week: {start_d} to {end_d}")
     
     if not api_key:
-        logger.error("DATABENTO_API_KEY not found in .env file")
-        logger.error(f"Please set it in: {env_path}")
+        logger.error("DATABENTO_API_KEY not found. Set it in .env at project root.")
         return 1
     
     dbn_files = download_new_data(

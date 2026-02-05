@@ -1,11 +1,12 @@
 import os
-from dotenv import load_dotenv
-import yaml
+
 import duckdb
+import yaml
 from pathlib import Path
 
+from src.utils.env import load_env
 
-load_dotenv()
+load_env()
 
 
 def get_paths():

@@ -1,6 +1,6 @@
 # Download Scripts
 
-Data download & ingestion. See [QUICK_REFERENCE.md](../../QUICK_REFERENCE.md#download-commands) for full documentation.
+Data download & ingestion. See [QUICK_REFERENCE.md](../../docs/QUICK_REFERENCE.md#download-commands) for full documentation.
 
 ## Scripts
 

@@ -36,12 +36,14 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from dotenv import load_dotenv
-
 # Ensure project root is importable
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.utils.env import load_env
+
+load_env()
 
 from pipelines.common import get_paths, connect_duckdb
 
@@ -326,12 +328,6 @@ def main() -> int:
     configure_logging(verbose=args.verbose)
     
     # Load environment
-    env_path = PROJECT_ROOT / ".env"
-    if env_path.exists():
-        load_dotenv(dotenv_path=env_path)
-    else:
-        load_dotenv()
-    
     # Get financial-data-system DB path
     if args.fin_db_path:
         fin_db_path = Path(args.fin_db_path).resolve()

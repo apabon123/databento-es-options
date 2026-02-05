@@ -1,0 +1,63 @@
+# Canonical Futures-Six contract series mapping
+# Maps each root to the canonical front-month continuous contract_series used in
+# g_continuous_bar_daily. Downstream systems (e.g., Futures-Six) query these
+# series via v_canonical_continuous_bar_daily.
+#
+# Naming: {ROOT}_FRONT_{ROLL_STRATEGY} for front month (rank 0).
+# Roll strategy: CALENDAR for equity/FX/vol (.c.), VOLUME for rates/commodities (.v.).
+
+roots:
+  # Equity indices (calendar roll)
+  ES:
+    contract_series: ES_FRONT_CALENDAR
+    description: S&P 500 e-mini
+  NQ:
+    contract_series: NQ_FRONT_CALENDAR
+    description: Nasdaq-100 e-mini
+  RTY:
+    contract_series: RTY_FRONT_CALENDAR
+    description: Russell 2000 e-mini
+
+  # Rates (volume roll)
+  ZT:
+    contract_series: ZT_FRONT_VOLUME
+    description: 2Y Treasury note
+  ZF:
+    contract_series: ZF_FRONT_VOLUME
+    description: 5Y Treasury note
+  ZN:
+    contract_series: ZN_FRONT_VOLUME
+    description: 10Y Treasury note
+  UB:
+    contract_series: UB_FRONT_VOLUME
+    description: Ultra-bond (30Y+)
+
+  # Commodities (volume roll)
+  CL:
+    contract_series: CL_FRONT_VOLUME
+    description: WTI crude oil
+  GC:
+    contract_series: GC_FRONT_VOLUME
+    description: COMEX gold
+
+  # FX (calendar roll)
+  "6E":
+    contract_series: 6E_FRONT_CALENDAR
+    description: EUR/USD
+  "6J":
+    contract_series: 6J_FRONT_CALENDAR
+    description: JPY/USD
+  "6B":
+    contract_series: 6B_FRONT_CALENDAR
+    description: GBP/USD
+
+  # STIR (calendar roll)
+  SR3:
+    contract_series: SR3_FRONT_CALENDAR
+    description: SOFR 3M front month
+
+  # Volatility (calendar roll, optional)
+  VX:
+    contract_series: VX_FRONT_CALENDAR
+    description: VIX futures
+    optional: true
